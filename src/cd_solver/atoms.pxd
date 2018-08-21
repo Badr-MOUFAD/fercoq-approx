@@ -19,12 +19,13 @@ cdef enum MODE:
     VAL = 0
     GRAD = 1
     PROX = 2
-    LIPSCHITZ = 3
+    PROX_CONJ = 3
+    LIPSCHITZ = 4
 
 cdef int STRING_LONG_ENOUGH = 6
 
 cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode=*,
-                       DOUBLE prox_param=*) nogil
+                       DOUBLE prox_param=*, DOUBLE prox_param2=*) nogil
 
 # func_string can be:
 #    square
