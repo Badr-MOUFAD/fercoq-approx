@@ -253,12 +253,11 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
                 coord = pb.blocks_f[j] + l
                 z[coord] = pb.cf[j] * buff[l]
         val += z.dot(np.array(rf)) + pb.bf.dot(np.array(rf))   # = f(Af x - bf) + f*(z)
-        print('contrib f:', val)
+        # print('contrib f:', val)
         AfTz = pb.Af.T.dot(z)
     else:
         AfTz = np.zeros(pb.N)
     if pb.h_present is True:
-        # Theory would require us to do one more prox_h* but we do not do it
         AhTSy = pb.Ah.T.dot(np.array(Sy))
     else:
         AhTSy = np.zeros(pb.N)
@@ -276,7 +275,7 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
                 buff_x[i] = pb.Dg.data[0][ii] * x[coord] - pb.bg[coord]
             val_g += pb.cg[ii] * my_eval(g[ii], buff_x, buff,
                                            nb_coord=nb_coord)
-        print('g(x) = ', val_g)
+        # print('g(x) = ', val_g)
 
         # estimate dual infeasibility
         dual_infeas = 0.
@@ -309,7 +308,7 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
                 buff_x[i] = pb.Dg.data[0][ii] * (
                     x[coord] - 1. / gamma[0] * (AfTz[coord] + AhTSy[coord])) - pb.bg[coord]
             my_eval(g[ii], buff_x, buff,
-                        nb_coord=pb.blocks[ii+1]-pb.blocks[ii],
+                        nb_coord=nb_coord,
                         mode=PROX, prox_param=pb.cg[ii]*pb.Dg.data[0][ii]**2/gamma[0])
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
@@ -328,27 +327,25 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
 
     if pb.h_present is True:
         val_h = 0.
-        # compute h*(Sy) + bh.Sy = Sybar.Sy - h(Sybar) + bh.Sy
+        val_hh = 0.
+        val_h2 = 0.
+        # compute h*(Sy) + bh.Sy
+        test = 0.
         for jh in range(len(pb.h)):
             nb_coord = pb.blocks_h[jh+1] - pb.blocks_h[jh]
             for l in range(nb_coord):
                 coord = pb.blocks_h[jh] + l
-                buff_y[l] = Sy[coord] + INF * Sy[coord]
-            my_eval(h[jh], buff_y, buff, nb_coord=nb_coord,
-                            mode=PROX, prox_param=pb.ch[jh]*INF)
+                buff_y[l] = Sy[coord] / pb.ch[jh]
+            val_h += pb.ch[jh] * my_eval(h[jh], buff_y, buff, nb_coord=nb_coord,
+                            mode=VAL_CONJ)
             for l in range(nb_coord):
-                buff_y[l] = buff[l]
-            h_Sybar = my_eval(h[jh], buff_y, buff, nb_coord=nb_coord,
-                            mode=VAL)
-            val_h -= h_Sybar
-            for l in range(nb_coord):
-                val_h += buff_y[l] * Sy[coord]
-                val_h += pb.bh[coord] * Sy[coord]
+                coord = pb.blocks_h[jh] + l
+                val_hh += pb.bh[coord] * Sy[coord]
 
         if pb.h_takes_infinite_values == False:
             # compute h(Ah x - bh)
             for jh in range(len(pb.h)):
-                val_h += pb.ch[jh] * my_eval(h[jh],
+                val_h2 += pb.ch[jh] * my_eval(h[jh],
                                         rhx[pb.blocks_h[jh]:pb.blocks_h[jh+1]],
                                         buff,
                                         nb_coord=pb.blocks_h[jh+1] - pb.blocks_h[jh])
@@ -362,7 +359,7 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
                     coord = pb.blocks_h[jh] + l
                     buff_y[l] = Sy[coord] + 1. / beta[0] * rhx[coord]
                 my_eval(h[jh], buff_y, buff,
-                            nb_coord=pb.blocks_h[jh+1]-pb.blocks[jh],
+                            nb_coord=nb_coord,
                             mode=PROX_CONJ, prox_param=1./beta[0], prox_param2=pb.ch[jh])
 
                 # compute -h*(ybar) = -ybar.ybarbar + h(ybarbar)
@@ -376,13 +373,13 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
                     buff_y[l] = buff[l]
                 h_ybarbar = my_eval(h[jh], buff_y, buff, nb_coord=nb_coord,
                             mode=VAL)
-                val_h += h_ybarbar
+                val_h2 += h_ybarbar
                 for l in range(nb_coord):
                     coord = pb.blocks_h[jh] + l
-                    val_h -= buff_y[l] * ybar[coord]
-                    val_h += rhx[coord] * ybar[coord] - beta[0] / 2. * (Sy[coord] - ybar[coord])**2
-        # print('contrib h:', val_h, h_ybarbar, np.array(rhx), np.array(ybar), np.array(Sy))
-        val += val_h
+                    val_h2 -= buff_y[l] * ybar[coord]
+                    val_h2 += rhx[coord] * ybar[coord] - beta[0] / 2. * (Sy[coord] - ybar[coord])**2
+        # print('contrib h:', val_h, val_hh, val_h2, np.array(Sy))
+        val += val_h + val_hh + val_h2
     return val
 
 
@@ -424,21 +421,21 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
     if f_present is True:
         f = <unsigned char**>malloc(len(pb.f)*sizeof(char*))
         for j in range(len(pb.f)):
-            f[j] = pb.f[j]
+            f[j] = <bytes>pb.f[j]
 
     cdef int g_present = pb.g_present
     cdef unsigned char** g
     if g_present is True:
         g = <unsigned char**>malloc(len(pb.g)*sizeof(char*))
         for ii in range(len(pb.g)):
-            g[ii] = pb.g[ii]
+            g[ii] = <bytes>pb.g[ii]
 
     cdef int h_present = pb.h_present
     cdef unsigned char** h
     if h_present is True:
         h = <unsigned char**>malloc(len(pb.h)*sizeof(char*))
         for jh in range(len(pb.h)):
-            h[jh] = pb.h[jh]
+            h[jh] = <bytes>pb.h[jh]
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
 
     cdef UINT32_t[:] inv_blocks_h = np.zeros(pb.Ah.shape[0], dtype=np.uint32)
@@ -654,8 +651,22 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
                                   %(elapsed_time, iter, primal_val, change_in_x))
                 elif print_style == 'smoothed_gap':
                     beta = infeas
-                    smoothed_gap = compute_smoothed_gap(pb, f, g, h, x, rf, rhx, Sy,
-                                                    buff_x, buff_y, buff, &beta, &gamma)
+                    if h_present is True:
+                        # Compute one more prox_h* in case Sy is not feasible
+                        for j in range(len(pb.h)):
+                            for l in range(blocks_h[j+1]-blocks_h[j]):
+                                buff_y[l] = Sy[blocks_h[j]+l] \
+                                      + rhx[blocks_h[j]+l] * dual_step_size[jh]
+                            my_eval(h[j], buff_y, buff,
+                                    nb_coord=blocks_h[j+1]-blocks_h[j],
+                                    mode=PROX_CONJ,
+                                    prox_param=dual_step_size[jh],
+                                    prox_param2=ch[j])
+                            for l in range(blocks_h[j+1]-blocks_h[j]):
+                                prox_y[blocks_h[j]+l] = buff[l]
+                    smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
+                                        rf, rhx, prox_y,
+                                        buff_x, buff_y, buff, &beta, &gamma)
                     
                     print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
                               %(elapsed_time, iter, primal_val, infeas, smoothed_gap, beta, gamma, change_in_x, change_in_y))

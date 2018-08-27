@@ -15,6 +15,26 @@
 
 cdef DOUBLE INF = 1e30
 
+
+cdef DOUBLE val_conj_not_implemented(unsigned char* func_string,
+                DOUBLE[:] x, DOUBLE[:] buff, int nb_coord) nogil:
+    # Approximate f*(x) by sup <x, z> - f(z) - alpha/2. ||z||**2
+    # with alpha very small (prone to numerical errors)
+    cdef int i
+    cdef DOUBLE val_conj = 0.
+    for i in range(nb_coord):
+        x[i] = INF * x[i]
+    my_eval(func_string, x, buff, nb_coord, PROX, INF)
+    for i in range(nb_coord):
+        x[i] = x[i] / INF
+
+    for i in range(nb_coord):
+        val_conj += x[i] * buff[i]
+        val_conj -= 0.5 / INF * buff[i]**2
+    val_conj -= my_eval(func_string, buff, buff, nb_coord, VAL)
+    return val_conj
+
+
 cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode=VAL,
                         DOUBLE prox_param=1., DOUBLE prox_param2=1.) nogil:
     # Evaluate function func which is given as a chain of characters
@@ -51,7 +71,7 @@ cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int
         return ineq_const(x, buff, nb_coord, mode, prox_param)
     elif func_string[0] == "z":
         return zero(x, buff, nb_coord, mode, prox_param)
-    # TODO: logsumexp, norm2, quadratic...
+    # TODO: logsumexp, quadratic...
 
 
 cdef DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
@@ -69,6 +89,8 @@ cdef DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE 
     elif mode == LIPSCHITZ:
         buff[0] = 2.
         return buff[0]
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("square", x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             val += x[i] * x[i]
@@ -105,6 +127,8 @@ cdef DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pro
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("abs", x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             val += fabs(x[i])
@@ -138,10 +162,14 @@ cdef DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE p
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == VAL_CONJ:
+        if val > 1.00000001:
+            return INF
+        return 0.
     else:  # mode == VAL
         return val
 
-    
+
 cdef DOUBLE linear(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x -> x
     cdef int i
@@ -157,6 +185,8 @@ cdef DOUBLE linear(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE 
     elif mode == LIPSCHITZ:
         buff[0] = 0.
         return buff[0]
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("linear", x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             val += x[0]
@@ -184,6 +214,8 @@ cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
     elif mode == LIPSCHITZ:
         buff[0] = 1. / 4.
         return buff[0]
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("log1pexp", x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 30.:
@@ -208,6 +240,8 @@ cdef DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, D
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("box_zero_one", x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 1.:
@@ -232,6 +266,9 @@ cdef DOUBLE eq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == VAL_CONJ:
+        return 0.
+        # return val_conj_not_implemented("eq_const", x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 0:
@@ -256,6 +293,8 @@ cdef DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOU
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("ineq_const", x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] < 0:
@@ -277,6 +316,8 @@ cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pr
     elif mode == LIPSCHITZ:
         buff[0] = 0.
         return buff[0]
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("zero", x, buff, nb_coord)
     else:  # mode == VAL
         return 0.
 

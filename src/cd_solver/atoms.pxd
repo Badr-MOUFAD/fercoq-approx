@@ -17,10 +17,11 @@ ctypedef np.int32_t INT32_t
 
 cdef enum MODE:
     VAL = 0
-    GRAD = 1
-    PROX = 2
-    PROX_CONJ = 3
-    LIPSCHITZ = 4
+    VAL_CONJ = 1
+    GRAD = 2
+    PROX = 3
+    PROX_CONJ = 4
+    LIPSCHITZ = 5
 
 cdef int STRING_LONG_ENOUGH = 6
 

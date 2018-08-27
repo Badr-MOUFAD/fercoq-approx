@@ -1,3 +1,7 @@
+## TODO: additional prox step in h before computing smoothed gap
+#        code VAL_CONJ
+#        SMART-CD
+
 import numpy as np
 
 import scipy.sparse as sp
@@ -12,7 +16,7 @@ sys.path.append("../tv_l1_solver")
 from load_poldrack import load_gain_poldrack
 
 
-probs = [1]
+probs = [9]  # range(11)
 
 for prob in probs:
     if prob == 0:
@@ -59,7 +63,7 @@ for prob in probs:
                                                g=["square"] * X.shape[1],
                                                cg=[0.5*0.01*np.linalg.norm(X.T.dot(y), np.inf)] * X.shape[1])
 
-        cd_solver.coordinate_descent(pb_leukemia_logreg, max_iter=150, verbose=0.5, print_style='smoothed_gap')
+        cd_solver.coordinate_descent(pb_leukemia_logreg, max_iter=150, verbose=2., print_style='smoothed_gap')
 
     if prob == 3:
         # SVM
@@ -101,7 +105,7 @@ for prob in probs:
 
         pb_toy_const = cd_solver.Problem(N=2, f=f, Af=Af, bf=bf, cf=cf, h=h, Ah=Ah)
 
-        cd_solver.coordinate_descent(pb_toy_const, max_iter=100, verbose=0.00001, print_style='smoothed_gap')
+        cd_solver.coordinate_descent(pb_toy_const, max_iter=100, verbose=0.001, print_style='smoothed_gap')
 
     if prob == 6:
         # SVM with intercept
@@ -110,11 +114,11 @@ for prob in probs:
         alpha = 1000
         Xred = np.linalg.cholesky(np.array((X.dot(X.T)).todense()))
         pb_leukemia_svm_intercept = cd_solver.Problem(N=X.shape[0],
-                                            f=["square"] * Xred.shape[1] + ["linear"] * X.shape[0],
-                                            Af=sp.vstack([Xred.T * y, -sp.eye(X.shape[0])], format="csc"),
-                                            bf=np.zeros(Xred.shape[1] + X.shape[0]),
-                                            cf=[0.5/alpha] * Xred.shape[1] + [1] * X.shape[0],
-                                            g=["box_zero_one"] * X.shape[0],
+                                            f=["square"] * Xred.shape[1] + ["linear"],
+                                            Af=sp.vstack([Xred.T * y, -np.ones((1,X.shape[0]))], format="csc"),
+                                            bf=np.zeros(Xred.shape[1]+1),
+                                            cf=[0.5/alpha] * Xred.shape[1] + [1],
+                                            # g=["box_zero_one"] * X.shape[0],
                                             h=["eq_const"],
                                             Ah=sp.csc_matrix(y)
                                                           )
@@ -133,17 +137,17 @@ for prob in probs:
         alpha = 0.25 / X.shape[0]
 
         pb_rcv1_svm_intercept = cd_solver.Problem(N=X.shape[0],
-                                            f=["square"] * X.shape[1] + ["linear"] * X.shape[0],
-                                            Af=sp.vstack([X.T.multiply(y), -sp.eye(X.shape[0])], format="csc"),
-                                            bf=np.zeros(X.shape[1] + X.shape[0]),
-                                            cf=[C] * X.shape[1] + [1] * X.shape[0],
+                                            f=["square"] * X.shape[1] + ["linear"],
+                                            Af=sp.vstack([X.T.multiply(y), -np.ones((1,X.shape[0]))], format="csc"),
+                                            bf=np.zeros(X.shape[1] + 1),
+                                            cf=[C] * X.shape[1] + [1],
                                             g=["box_zero_one"] * X.shape[0],
                                             Dg=alpha*sp.eye(X.shape[0]),
                                             h=["eq_const"],
                                             Ah=sp.csc_matrix(y)
                                                           )
         
-        cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=100, verbose=0.5, print_style='smoothed_gap')
+        cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=100, verbose=2., print_style='smoothed_gap', step_size_factor=alpha/1000)
 
     if prob == 8:
         print("TV regularized least squares on toy dataset")
@@ -235,7 +239,7 @@ for prob in probs:
                                         Ah=alpha*threeDgradient
                                         )
 
-        cd_solver.coordinate_descent(pb_fmri_tvl1, max_iter=100, verbose=1., max_time=100., step_size_factor=10., print_style='smoothed_gap')
+        cd_solver.coordinate_descent(pb_fmri_tvl1, max_iter=100, verbose=20., max_time=100., step_size_factor=10., print_style='smoothed_gap')
 
     if prob == 10:
         # LP  --  min c.dot(x) : Mx <= b
@@ -250,7 +254,7 @@ for prob in probs:
                                 f=["linear"],
                                 Af=c,
                                 g=["ineq_const"]*n,
-                                h=["eq_const"]*d,
+                                h=["ineq_const"]*d,
                                 Ah=-M,
                                 bh=-b
                                 )
