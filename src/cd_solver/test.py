@@ -16,7 +16,7 @@ sys.path.append("../tv_l1_solver")
 from load_poldrack import load_gain_poldrack
 
 
-probs = [9]  # range(11)
+probs = [8]  # range(11)
 
 for prob in probs:
     if prob == 0:

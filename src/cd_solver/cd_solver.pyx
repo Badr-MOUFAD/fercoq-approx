@@ -383,6 +383,110 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
     return val
 
 
+cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x,
+        DOUBLE[:] y, DOUBLE[:] Sy, DOUBLE[:] prox_y,
+        DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_new,
+        DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
+        DOUBLE[:] grad,
+        UINT32_t[:] blocks, UINT32_t[:] blocks_f, UINT32_t[:] blocks_h,
+        UINT32_t[:] Af_indptr, UINT32_t[:] Af_indices, DOUBLE[:] Af_data,
+        DOUBLE[:] cf, DOUBLE[:] bf,
+        DOUBLE[:] Dg_data, DOUBLE[:] cg, DOUBLE[:] bg,
+        UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices, DOUBLE[:] Ah_data,
+        UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
+        UINT32_t[:,:] dual_vars_to_update,
+        DOUBLE[:] ch, DOUBLE[:] bh,
+        unsigned char** f, unsigned char** g, unsigned char** h,
+        int f_present, int g_present, int h_present,
+        DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
+        DOUBLE* change_in_x, DOUBLE* change_in_y):
+
+    cdef int ii, i, coord, nb_coord, j, jh, l, lh
+    ii = rand_int(n, rand_r_state)
+    nb_coord = blocks[ii+1] - blocks[ii]
+
+    if h_present is True:
+        # compute rhy = Ah.T D(m) Sy
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            rhy[i] = 0.
+            for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                jh = Ah_indices[l]
+                rhy[i] += Ah_data[l] * Sy[jh]
+
+        # Apply prox of h* in the dual space
+        for i in range(dual_vars_to_update[ii][0]):
+            lh = dual_vars_to_update[ii][1+i]
+            jh = Ah_indices[lh]  # jh in [0, Ah.shape[0][
+            j = inv_blocks_h[Ah_indices[lh]]
+            if (i == 0 or j != inv_blocks_h[Ah_indices[dual_vars_to_update[ii][i]]]):
+                for l in range(blocks_h[j+1]-blocks_h[j]):
+                    buff_y[l] = Sy[blocks_h[j]+l] \
+                                  + rhx[blocks_h[j]+l] * dual_step_size[jh]
+                my_eval(h[j], buff_y, buff,
+                            nb_coord=blocks_h[j+1]-blocks_h[j],
+                            mode=PROX_CONJ,
+                            prox_param=dual_step_size[jh],
+                            prox_param2=ch[j])
+                for l in range(blocks_h[j+1]-blocks_h[j]):
+                    prox_y[blocks_h[j]+l] = buff[l]
+            # else: we have already computed prox_y[blocks_h[j]:blocks_h[j+1]], so nothing to do
+
+            # update Sy
+            Sy[jh] += 1. / Ah_nnz_perrow[jh] * (prox_y[jh] - y[lh])
+            # update y
+            change_in_y[0] += fabs(prox_y[jh] - y[lh])
+            y[lh] = prox_y[jh]
+
+    for i in range(nb_coord):
+        coord = blocks[ii] + i
+        x_ii[i] = x[coord]
+
+        # Compute gradient of f and do gradient step
+        if f_present is True:
+            grad[i] = 0.
+            for l in range(Af_indptr[coord], Af_indptr[coord+1]):
+                j = Af_indices[l]
+                # TODO: code for the case blocks_f[j+1]-blocks_f[j] > 1
+                my_eval(f[j], rf[blocks_f[j]:blocks_f[j+1]], buff,
+                        nb_coord=blocks_f[j+1]-blocks_f[j], mode=GRAD)
+                grad[i] += cf[j] * Af_data[l] * buff[0]
+            x[coord] -= primal_step_size[ii] * grad[i]
+        if h_present is True:
+            # compute rhy_new = Ah.T D(m) Sy
+            rhy_new[i] = 0.
+            for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                jh = Ah_indices[l]
+                rhy_new[i] += Ah_data[l] * Sy[jh]
+            x[coord] -= primal_step_size[ii] * (2*rhy_new[i] - rhy[i])
+
+    # Apply prox of g
+    if g_present is True:
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
+        my_eval(g[ii], buff_x, buff, nb_coord=nb_coord,
+                    mode=PROX, prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size[ii])
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            x[coord] = (buff[i] + bg[coord])/ Dg_data[ii]
+
+    # Update residuals
+    for i in range(nb_coord):
+        coord = blocks[ii] + i
+        if x_ii[i] != x[coord]:
+            if f_present is True:
+                for l in range(Af_indptr[coord], Af_indptr[coord+1]):
+                    j = Af_indices[l]
+                    rf[j] += Af_data[l] * (x[coord] - x_ii[i])
+            if h_present is True:
+                for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                    jh = Ah_indices[lh]
+                    rhx[jh] += Ah_data[lh] * (x[coord] - x_ii[i])
+            change_in_x[0] += fabs(x_ii[i] - x[coord])
+    return
+
+
 def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style='classical',
                            min_change_in_x=1e-15, step_size_factor=1., callback=None):
 
@@ -545,91 +649,18 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
         change_in_x = 0.
         change_in_y = 0.
         for f_iter in range(2*n):
-            # with nogil:
-                ii = rand_int(n, rand_r_state)
-                nb_coord = blocks[ii+1] - blocks[ii]
-
-                if h_present is True:
-                    # compute rhy = Ah.T D(m) Sy
-                    for i in range(nb_coord):
-                        coord = blocks[ii] + i
-                        rhy[i] = 0.
-                        for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                            jh = Ah_indices[l]
-                            rhy[i] += Ah_data[l] * Sy[jh]
-
-                # Apply prox of h* in the dual space
-                if h_present is True:
-                    for i in range(dual_vars_to_update[ii][0]):
-                        lh = dual_vars_to_update[ii][1+i]
-                        jh = Ah_indices[lh]  # jh in [0, Ah.shape[0][
-                        j = inv_blocks_h[Ah_indices[lh]]
-                        if (i == 0 or j != inv_blocks_h[Ah_indices[dual_vars_to_update[ii][i]]]):
-                            for l in range(blocks_h[j+1]-blocks_h[j]):
-                                buff_y[l] = Sy[blocks_h[j]+l] \
-                                  + rhx[blocks_h[j]+l] * dual_step_size[jh]
-                            my_eval(h[j], buff_y, buff,
-                                        nb_coord=blocks_h[j+1]-blocks_h[j],
-                                        mode=PROX_CONJ,
-                                        prox_param=dual_step_size[jh],
-                                        prox_param2=ch[j])
-                            for l in range(blocks_h[j+1]-blocks_h[j]):
-                                prox_y[blocks_h[j]+l] = buff[l]
-                        # else: we have already computed prox_y[blocks_h[j]:blocks_h[j+1]], so nothing to do
-
-                        # update Sy
-                        Sy[jh] += 1. / Ah_nnz_perrow[jh] * (prox_y[jh] - y[lh])
-                        # update y
-                        change_in_y += fabs(prox_y[jh] - y[lh])
-                        y[lh] = prox_y[jh]
-
-                for i in range(nb_coord):
-                    coord = blocks[ii] + i
-                    x_ii[i] = x[coord]
-
-                    # Compute gradient of f and do gradient step
-                    if f_present is True:
-                        grad[i] = 0.
-                        for l in range(Af_indptr[coord], Af_indptr[coord+1]):
-                            j = Af_indices[l]
-                            # TODO: code for the case blocks_f[j+1]-blocks_f[j] > 1
-                            my_eval(f[j], rf[blocks_f[j]:blocks_f[j+1]], buff,
-                                            nb_coord=blocks_f[j+1]-blocks_f[j], mode=GRAD)
-                            grad[i] += cf[j] * Af_data[l] * buff[0]
-                        x[coord] -= primal_step_size[ii] * grad[i]
-                    if h_present is True:
-                        # compute rhy_new = Ah.T D(m) Sy
-                        rhy_new[i] = 0.
-                        for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                            jh = Ah_indices[l]
-                            rhy_new[i] += Ah_data[l] * Sy[jh]
-                        x[coord] -= primal_step_size[ii] * (2*rhy_new[i] - rhy[i])
-
-                # Apply prox of g
-                if g_present is True:
-                    for i in range(nb_coord):
-                        coord = blocks[ii] + i
-                        buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
-                    my_eval(g[ii], buff_x, buff, nb_coord=nb_coord,
-                            mode=PROX, prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size[ii])
-                    for i in range(nb_coord):
-                        coord = blocks[ii] + i
-                        x[coord] = (buff[i] + bg[coord])/ Dg_data[ii]
-
-
-                # Update residuals
-                for i in range(nb_coord):
-                    coord = blocks[ii] + i
-                    if x_ii[i] != x[coord]:
-                        if f_present is True:
-                            for l in range(Af_indptr[coord], Af_indptr[coord+1]):
-                                j = Af_indices[l]
-                                rf[j] += Af_data[l] * (x[coord] - x_ii[i])
-                        if h_present is True:
-                            for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                                jh = Ah_indices[lh]
-                                rhx[jh] += Ah_data[lh] * (x[coord] - x_ii[i])
-                    change_in_x += fabs(x_ii[i] - x[coord])
+            one_step_coordinate_descent(n, rand_r_state, x,
+                    y, Sy, prox_y, rhx, rf, rhy, rhy_new,
+                    buff_x, buff_y, buff, x_ii, grad,
+                    blocks, blocks_f, blocks_h,
+                    Af_indptr, Af_indices, Af_data, cf, bf,
+                    Dg_data, cg, bg,
+                    Ah_indptr, Ah_indices, Ah_data,
+                    inv_blocks_h, Ah_nnz_perrow, dual_vars_to_update,
+                    ch, bh,
+                    f, g, h, f_present, g_present, h_present,
+                    primal_step_size, dual_step_size,
+                    &change_in_x, &change_in_y)
 
         elapsed_time = time.time() - init_time
         if verbose > 0:
