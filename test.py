@@ -1,3 +1,4 @@
+# Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 
 import numpy as np
 

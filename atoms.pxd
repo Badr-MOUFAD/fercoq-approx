@@ -29,6 +29,5 @@ cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int
                        DOUBLE prox_param=*, DOUBLE prox_param2=*) nogil
 
 # func_string can be:
-#    square
-#    abs
-#    zero
+#    "square", "abs", "norm2", "linear", "log1pexp", "box_zero_one", 
+#    "eq_const", "ineq_cont", "zero"

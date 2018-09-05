@@ -1,3 +1,4 @@
+# Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
 
 
