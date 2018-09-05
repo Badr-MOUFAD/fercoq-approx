@@ -252,7 +252,7 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
             for l in range(pb.blocks_f[j+1]-pb.blocks_f[j]):
                 coord = pb.blocks_f[j] + l
                 z[coord] = pb.cf[j] * buff[l]
-        val += z.dot(np.array(rf)) + pb.bf.dot(np.array(rf))   # = f(Af x - bf) + f*(z)
+        val += z.dot(np.array(rf)) + pb.bf.dot(z)   # = f(Af x - bf) + f*(z) + bf.dot(z)
         # print('contrib f:', val)
         AfTz = pb.Af.T.dot(z)
     else:
@@ -559,7 +559,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
             dual_vars_to_update[ii][0] = len(dual_vars_to_update_[ii])
             for i in range(len(dual_vars_to_update_[ii])):
                 dual_vars_to_update[ii][i+1] = dual_vars_to_update_[ii][i]
-
+    else:
+        dual_vars_to_update = np.empty((0,0), dtype=np.uint32)
 
     # Definition of residuals
     cdef DOUBLE[:] rf

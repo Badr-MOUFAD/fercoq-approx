@@ -221,7 +221,7 @@ cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
             if x[i] > 30.:
                 val += x[i]
             else:
-                val += log(1.+exp(x[0]))
+                val += log(1.+exp(x[i]))
         return val
     
 

@@ -1,6 +1,3 @@
-## TODO: additional prox step in h before computing smoothed gap
-#        code VAL_CONJ
-#        SMART-CD
 
 import numpy as np
 
@@ -10,13 +7,13 @@ import cd_solver
 # imports for loading datasets
 from scipy import io
 from sklearn.datasets.mldata import fetch_mldata
-from sklearn.externals.joblib import Memory
-import sys
-sys.path.append("../tv_l1_solver")
-from load_poldrack import load_gain_poldrack
+#from sklearn.externals.joblib import Memory
+#import sys
+#sys.path.append("../tv_l1_solver")
+#from load_poldrack import load_gain_poldrack
 
 
-probs = [8]  # range(11)
+probs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]  # range(11)
 
 for prob in probs:
     if prob == 0:
@@ -57,7 +54,7 @@ for prob in probs:
         print("logistic regression on Leukemia")
         pb_leukemia_logreg = cd_solver.Problem(N=X.shape[1],
                                                f=["log1pexp"] * X.shape[0],
-                                               Af=X,
+                                               Af=(X.T.multiply(y)).T,
                                                bf=y,
                                                cf=[1] * X.shape[0],
                                                g=["square"] * X.shape[1],

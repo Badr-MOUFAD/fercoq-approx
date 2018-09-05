@@ -18,10 +18,7 @@ def configuration():
     
     config.add_extension(name='cd_solver',
                          sources=['cd_solver.cpp'])
-    
-    config.add_extension(name='test2',
-                         sources=['test2.cpp'])
-    
+        
     return config
 
 if __name__ == '__main__':
