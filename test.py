@@ -99,7 +99,7 @@ for prob in probs:
         Af = np.eye(2)
 
         h = ["eq_const", "eq_const"]
-        Ah = np.array([[1, 1], [1,0]])
+        Ah = np.array([[-1, 1], [2,0]])
 
         pb_toy_const = cd_solver.Problem(N=2, f=f, Af=Af, bf=bf, cf=cf, h=h, Ah=Ah)
 

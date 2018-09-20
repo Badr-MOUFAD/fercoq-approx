@@ -386,7 +386,7 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
 
 cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] Sy, DOUBLE[:] prox_y,
-        DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_new,
+        DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_ii,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
         DOUBLE[:] grad,
         UINT32_t[:] blocks, UINT32_t[:] blocks_f, UINT32_t[:] blocks_h,
@@ -395,7 +395,7 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
         DOUBLE[:] Dg_data, DOUBLE[:] cg, DOUBLE[:] bg,
         UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices, DOUBLE[:] Ah_data,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
-        UINT32_t[:,:] dual_vars_to_update,
+        UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
         unsigned char** f, unsigned char** g, unsigned char** h,
         int f_present, int g_present, int h_present,
@@ -403,17 +403,14 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
         DOUBLE* change_in_x, DOUBLE* change_in_y):
 
     cdef int ii, i, coord, nb_coord, j, jh, l, lh
+    cdef DOUBLE dy
     ii = rand_int(n, rand_r_state)
     nb_coord = blocks[ii+1] - blocks[ii]
 
     if h_present is True:
-        # compute rhy = Ah.T D(m) Sy
         for i in range(nb_coord):
             coord = blocks[ii] + i
-            rhy[i] = 0.
-            for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                jh = Ah_indices[l]
-                rhy[i] += Ah_data[l] * Sy[jh]
+            rhy_ii[i] = rhy[coord]
 
         # Apply prox of h* in the dual space
         for i in range(dual_vars_to_update[ii][0]):
@@ -431,13 +428,16 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
                             prox_param2=ch[j])
                 for l in range(blocks_h[j+1]-blocks_h[j]):
                     prox_y[blocks_h[j]+l] = buff[l]
-            # else: we have already computed prox_y[blocks_h[j]:blocks_h[j+1]], so nothing to do
+            # else: we have already computed prox_y[blocks_h[j]:blocks_h[j+1]], so nothing to do. Moreover, we can update Sy[jh] safely.
 
-            # update Sy
-            Sy[jh] += 1. / Ah_nnz_perrow[jh] * (prox_y[jh] - y[lh])
             # update y
-            change_in_y[0] += fabs(prox_y[jh] - y[lh])
+            dy = prox_y[jh] - y[lh]
             y[lh] = prox_y[jh]
+            change_in_y[0] += fabs(dy)
+            # update Sy
+            Sy[jh] += 1. / Ah_nnz_perrow[jh] * dy
+            # update rhy
+            rhy[Ah_col_indices[lh]] += Ah_data[lh] * dy
 
     for i in range(nb_coord):
         coord = blocks[ii] + i
@@ -454,12 +454,7 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
                 grad[i] += cf[j] * Af_data[l] * buff[0]
             x[coord] -= primal_step_size[ii] * grad[i]
         if h_present is True:
-            # compute rhy_new = Ah.T D(m) Sy
-            rhy_new[i] = 0.
-            for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                jh = Ah_indices[l]
-                rhy_new[i] += Ah_data[l] * Sy[jh]
-            x[coord] -= primal_step_size[ii] * (2*rhy_new[i] - rhy[i])
+            x[coord] -= primal_step_size[ii] * (2*rhy[coord] - rhy_ii[i])
 
     # Apply prox of g
     if g_present is True:
@@ -517,8 +512,9 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
     cdef DOUBLE[:] ch = pb.ch
     cdef UINT32_t[:] Ah_indptr = np.array(pb.Ah.indptr, dtype=np.uint32)
     cdef UINT32_t[:] Ah_indices = np.array(pb.Ah.indices, dtype=np.uint32)  # I do not know why but the order of the indices is changed here...
-    cdef DOUBLE[:] Ah_data = np.array(pb.Ah.data, dtype=float)  # Fortunately, it seems that the same thin happens here.
+    cdef DOUBLE[:] Ah_data = np.array(pb.Ah.data, dtype=float)  # Fortunately, it seems that the same thing happens here.
     cdef UINT32_t[:] Ah_nnz_perrow = np.array((pb.Ah!=0).sum(axis=1), dtype=np.uint32).ravel()
+            
     cdef DOUBLE[:] bh = pb.bh
 
     cdef int f_present = pb.f_present
@@ -542,6 +538,12 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
         for jh in range(len(pb.h)):
             h[jh] = <bytes>pb.h[jh]
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
+
+    cdef UINT32_t[:] Ah_col_indices = np.empty(Ah_indices.shape[0], dtype=np.uint32)
+    if h_present is True:
+        for i in range(N):
+            for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
+                Ah_col_indices[lh] = i
 
     cdef UINT32_t[:] inv_blocks_h = np.zeros(pb.Ah.shape[0], dtype=np.uint32)
     cdef UINT32_t[:,:] dual_vars_to_update
@@ -575,10 +577,12 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
     else:
         rhx = np.empty(0)
     cdef DOUBLE[:] Sy = np.zeros(pb.Ah.shape[0])  # Sy is the mean of the duplicates of y
+    cdef DOUBLE[:] rhy = np.zeros(pb.Ah.shape[1])
     if h_present is True:
         for i in range(N):
             for l in range(Ah_indptr[i], Ah_indptr[i+1]):
                 Sy[Ah_indices[l]] += y[l] / Ah_nnz_perrow[Ah_indices[l]]
+                rhy[i] += Ah_data[l] * y[l]
 
     cdef UINT32_t rand_r_state_seed = np.random.randint(RAND_R_MAX)
     cdef UINT32_t* rand_r_state = &rand_r_state_seed
@@ -589,8 +593,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
     cdef DOUBLE[:] grad = np.zeros(max_nb_coord)
     cdef DOUBLE[:] x_ii = np.zeros(max_nb_coord)
     cdef DOUBLE[:] prox_y = np.zeros(pb.Ah.shape[0])
-    cdef DOUBLE[:] rhy = np.zeros(max_nb_coord)
-    cdef DOUBLE[:] rhy_new = np.zeros(max_nb_coord)
+    cdef DOUBLE[:] rhy_ii = np.zeros(max_nb_coord)
     cdef DOUBLE[:] buff_x = np.zeros(max_nb_coord)
     cdef DOUBLE[:] buff_y = np.zeros(max_nb_coord_h)
     cdef DOUBLE[:] buff = np.zeros(max(max_nb_coord, max_nb_coord_h))
@@ -652,13 +655,14 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
         change_in_y = 0.
         for f_iter in range(2*n):
             one_step_coordinate_descent(n, rand_r_state, x,
-                    y, Sy, prox_y, rhx, rf, rhy, rhy_new,
+                    y, Sy, prox_y, rhx, rf, rhy, rhy_ii,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
                     Af_indptr, Af_indices, Af_data, cf, bf,
                     Dg_data, cg, bg,
                     Ah_indptr, Ah_indices, Ah_data,
-                    inv_blocks_h, Ah_nnz_perrow, dual_vars_to_update,
+                    inv_blocks_h, Ah_nnz_perrow, Ah_col_indices,
+                    dual_vars_to_update,
                     ch, bh,
                     f, g, h, f_present, g_present, h_present,
                     primal_step_size, dual_step_size,
@@ -714,7 +718,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
             print("Not enough change in iterates (||x(t+1) - x(t)|| = %.5e): "
                       "stopping the algorithm" %change_in_x)
             break
-
+        
     pb.sol = np.array(x).copy()
     pb.dual_sol = np.array(Sy).copy()
     pb.dual_sol_duplicated = np.array(y).copy()
