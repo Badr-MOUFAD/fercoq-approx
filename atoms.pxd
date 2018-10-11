@@ -22,6 +22,7 @@ cdef enum MODE:
     PROX = 3
     PROX_CONJ = 4
     LIPSCHITZ = 5
+    IS_KINK = 6
 
 cdef int STRING_LONG_ENOUGH = 6
 

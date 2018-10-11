@@ -57,11 +57,7 @@ class Problem:
             # The default is N block of size 1.
             #
             # f, g and h are lists of strings that code for the name of a
-            # convex functions of the type
-            # cdef double function(double x, bool val=True,
-            #           bool grad=False, bool Lipschitz=False,
-            #           bool prox=False, double prox_param=1.,
-            #           double* buffer)
+            # convex function defined in atoms.pyx
             #
             # The rest of the parameters are arrays and matrices
             # We only allow blocks_g to be equal to blocks (for easier implementation)
@@ -78,42 +74,44 @@ class Problem:
                   if cf is None:
                         cf = np.ones(len(f))
                   if len(cf) != len(f):
-                        raise Warning("cf should have the same length as f")
+                        raise Warning("cf should have the same length as f.")
                   if Af is None:
-                        raise Warning("Af must be defined if f is")
+                        raise Warning("Af must be defined if f is.")
                   Af = sparse.csc_matrix(Af)
                   if Af.shape[1] != N:
-                        raise Warning("dimensions of Af and x do not match")
+                        raise Warning("dimensions of Af and x do not match.")
                   if bf is None:
                         bf = np.zeros(Af.shape[0])
                   if len(bf) != Af.shape[0]:
-                        raise Warning("dimensions of Af and bf do not match")
+                        raise Warning("dimensions of Af and bf do not match.")
             else:
                 self.f_present = False
                 f = []
                 cf = Af = bf = np.empty(0)
             if blocks_f is None:
                 blocks_f = np.arange(len(f)+1, dtype=np.uint32)
+            if len(blocks_f) != len(f) + 1 or blocks_f[-1] != Af.shape[0]:
+                  raise Warning("blocks_f seems to be ill defined.")
             
 
             if g is not None:
                   self.g_present = True
                   if len(g) != len(self.blocks) - 1:
-                        raise Warning("blocks for g and x should match")
+                        raise Warning("blocks for g and x should match.")
                   if cg is None:
                         cg = np.ones(len(g))
                   if len(cg) != len(g):
-                        raise Warning("cg should have the same length as g")
+                        raise Warning("cg should have the same length as g.")
                   if Dg is None:
                         Dg = sparse.eye(len(g))
                   if sparse.isspmatrix_dia(Dg) is not True:
-                        raise Warning("Dg must be a sparse diagonal matrix")
+                        raise Warning("Dg must be a sparse diagonal matrix.")
                   if Dg.shape[1] != len(g):
-                        raise Warning("dimensions of Dg and g do not match")
+                        raise Warning("dimensions of Dg and g do not match.")
                   if bg is None:
                         bg = np.zeros(N)
                   if len(bg) != N:
-                        raise Warning("dimensions of bg and x do not match")
+                        raise Warning("dimensions of bg and x do not match.")
             else:
                 self.g_present = False
                 g = []
@@ -125,16 +123,16 @@ class Problem:
                   if ch is None:
                         ch = np.ones(len(h))
                   if len(ch) != len(h):
-                        raise Warning("ch should have the same length as h")
+                        raise Warning("ch should have the same length as h.")
                   if Ah is None:
-                        raise Warning("Ah must be defined if h is")
+                        raise Warning("Ah must be defined if h is.")
                   Ah = sparse.csc_matrix(Ah)
                   if Ah.shape[1] != N:
-                        raise Warning("dimensions of Ah and x do not match")
+                        raise Warning("dimensions of Ah and x do not match.")
                   elif bh is None:
                         bh = np.zeros(Ah.shape[0])
                   if len(bh) != Ah.shape[0]:
-                        raise Warning("dimensions of Dh and bh do not match")
+                        raise Warning("dimensions of Dh and bh do not match.")
                   if h_takes_infinite_values is None:
                       if (any([h[j] == 'eq_const' for j in range(len(h))]) or
                               any([h[j] == 'box_zero_one' for j in range(len(h))]) or
@@ -151,9 +149,8 @@ class Problem:
                 h_takes_infinite_values = False
             if blocks_h is None:
                 blocks_h = np.arange(len(h)+1, dtype=np.uint32)
-            else:
-                if len(blocks_h) != len(h) + 1:
-                    raise Warning("dimensions of h and blocks_h do not match")
+            if len(blocks_h) != len(h) + 1 or blocks_h[-1] != Ah.shape[0]:
+                    raise Warning("blocks_h seems to be ill defined.")
 
             self.f = f
             self.cf = np.array(cf, dtype=float)
@@ -384,7 +381,7 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
     return val
 
 
-cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x,
+cdef void one_step_coordinate_descent(int ii, DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] Sy, DOUBLE[:] prox_y,
         DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_ii,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
@@ -394,6 +391,7 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
         DOUBLE[:] cf, DOUBLE[:] bf,
         DOUBLE[:] Dg_data, DOUBLE[:] cg, DOUBLE[:] bg,
         UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices, DOUBLE[:] Ah_data,
+        UINT32_t[:] inv_blocks_f,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
@@ -402,10 +400,9 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         DOUBLE* change_in_x, DOUBLE* change_in_y):
 
-    cdef int ii, i, coord, nb_coord, j, jh, l, lh
+    cdef int i, coord, j, jh, l, lh, jj, j_prev
+    cdef int nb_coord = blocks[ii+1] - blocks[ii]
     cdef DOUBLE dy
-    ii = rand_int(n, rand_r_state)
-    nb_coord = blocks[ii+1] - blocks[ii]
 
     if h_present is True:
         for i in range(nb_coord):
@@ -447,11 +444,16 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
         if f_present is True:
             grad[i] = 0.
             for l in range(Af_indptr[coord], Af_indptr[coord+1]):
-                j = Af_indices[l]
-                # TODO: code for the case blocks_f[j+1]-blocks_f[j] > 1
-                my_eval(f[j], rf[blocks_f[j]:blocks_f[j+1]], buff,
-                        nb_coord=blocks_f[j+1]-blocks_f[j], mode=GRAD)
-                grad[i] += cf[j] * Af_data[l] * buff[0]
+                jj = Af_indices[l]
+                if l > Af_indptr[coord]:
+                    j_prev = j
+                j = inv_blocks_f[jj]
+                if l == Af_indptr[coord] or j != j_prev:
+                    my_eval(f[j], rf[blocks_f[j]:blocks_f[j+1]], buff,
+                            nb_coord=blocks_f[j+1]-blocks_f[j], mode=GRAD)
+                # else: we have already computed it
+                #   good for dense Af but not optimal for diagonal Af
+                grad[i] += cf[j] * Af_data[l] * buff[jj - blocks_f[j]]
             x[coord] -= primal_step_size[ii] * grad[i]
         if h_present is True:
             x[coord] -= primal_step_size[ii] * (2*rhy[coord] - rhy_ii[i])
@@ -483,12 +485,22 @@ cdef void one_step_coordinate_descent(int n, UINT32_t* rand_r_state, DOUBLE[:] x
     return
 
 
-def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style='classical',
-                           min_change_in_x=1e-15, step_size_factor=1., callback=None):
-
+def coordinate_descent(pb, max_iter=1000, max_time=1000.,
+                           verbose=0, print_style='classical',
+                           min_change_in_x=1e-15, step_size_factor=1.,
+                           sampling='uniform', callback=None):
+    # pb is a Problem as defined above
+    # max_iter: maximum number of passes over the data
+    # max_time: in seconds
+    # verbose: if positive, time between two prints
+    # print_style: 'classical' or 'smoothed_gap'
+    # min_change_in_x: stopping criterion
+    # step_size_factor: number to balance primal and dual step sizes
+    # sampling: either 'uniform' or 'kink_half'
+    
     #--------------------- Prepare data ----------------------#
     
-    cdef UINT32_t ii, j, k, l, i, coord, lh, jh
+    cdef UINT32_t ii, j, jj, k, l, i, coord, lh, jh
     cdef UINT32_t f_iter
     cdef UINT32_t nb_coord
 
@@ -539,6 +551,13 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
             h[jh] = <bytes>pb.h[jh]
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
 
+    cdef UINT32_t[:] inv_blocks_f = np.zeros(pb.Af.shape[0], dtype=np.uint32)
+
+    if f_present is True:
+        for j in range(len(pb.f)):
+            for i in range(blocks_f[j+1] - blocks_f[j]):
+                inv_blocks_f[blocks_f[j]+i] = j
+                
     cdef UINT32_t[:] Ah_col_indices = np.empty(Ah_indices.shape[0], dtype=np.uint32)
     if h_present is True:
         for i in range(N):
@@ -610,7 +629,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
             for i in range(blocks[ii+1] - blocks[ii]):
                 coord = blocks[ii] + i
                 for l in range(Af_indptr[coord], Af_indptr[coord+1]):
-                    j = Af_indices[l]
+                    jj = Af_indices[l]
+                    j = inv_blocks_f[jj]
                     Lf[ii] += cf[j] * Af_data[l]**2 * tmp_Lf[j]
     del tmp_Lf
     cdef DOUBLE[:] primal_step_size = 1. / np.array(Lf)
@@ -621,6 +641,17 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
                                         np.array(Lf) / (norm2_columns_Ah + 1e-30))) \
                             * step_size_factor * np.ones(pb.Ah.shape[0])
         primal_step_size = 0.9 / (Lf + dual_step_size[0] * norm2_columns_Ah * np.max(np.array(Ah_nnz_perrow)))
+
+    cdef int sampling_law
+    if sampling == 'uniform':
+        sampling_law = 0
+    elif sampling == 'kink_half':
+        sampling_law = 1
+    cdef int focus_on_kink_or_not, n_active
+    cdef UINT32_t[:] active_set
+    if sampling_law == 1:
+        active_set = np.arange(n, dtype=np.uint32)
+        n_active = n
 
     cdef DOUBLE primal_val = 0.
     cdef DOUBLE infeas = 0.
@@ -648,19 +679,45 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
         nb_prints = 0
 
     # code in the case bloks_g = blocks only for the moment
-    for iter in range(0,int(max_iter),2):
+    for iter in range(int(max_iter)):
         if callback is not None:
             if callback(x, Sy, rf, rhx): break
+
+        if sampling_law == 1 and g_present is True:
+            # update active_set
+            n_active = 0
+            for ii in range(n):
+                nb_coord = blocks[ii+1] - blocks[ii]
+                for i in range(nb_coord):
+                    coord = blocks[ii] + i
+                    buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
+                if my_eval(g[ii], buff_x, buff, nb_coord=nb_coord,
+                        mode=IS_KINK) == 0:
+                    active_set[n_active] = ii
+                    n_active += 1
+            
         change_in_x = 0.
         change_in_y = 0.
-        for f_iter in range(2*n):
-            one_step_coordinate_descent(n, rand_r_state, x,
+        for f_iter in range(n):
+            if sampling_law == 0:
+                ii = rand_int(n, rand_r_state)
+            elif sampling_law == 1:
+                # probability 1/2 to focus on non-kink points
+                focus_on_kink_or_not = rand_int(2, rand_r_state)
+                if focus_on_kink_or_not == 0 or n_active == 0:
+                    ii = rand_int(n, rand_r_state)
+                else:
+                    ii = rand_int(n_active, rand_r_state)
+                    ii = active_set[ii]
+
+            one_step_coordinate_descent(ii, x,
                     y, Sy, prox_y, rhx, rf, rhy, rhy_ii,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
                     Af_indptr, Af_indices, Af_data, cf, bf,
                     Dg_data, cg, bg,
                     Ah_indptr, Ah_indices, Ah_data,
+                    inv_blocks_f,
                     inv_blocks_h, Ah_nnz_perrow, Ah_col_indices,
                     dual_vars_to_update,
                     ch, bh,
@@ -672,7 +729,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000., verbose=0, print_style
         if verbose > 0:
             if (elapsed_time > nb_prints * verbose
                     or change_in_x + change_in_y < min_change_in_x or elapsed_time > max_time
-                    or iter >= max_iter-2):
+                    or iter >= max_iter-1):
                 # Compute value
                 compute_primal_value(pb, f, g, h, x, rf, rhx, buff_x, buff_y, buff,
                                          &primal_val, &infeas)

@@ -14,7 +14,7 @@ from sklearn.datasets.mldata import fetch_mldata
 #from load_poldrack import load_gain_poldrack
 
 
-probs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]  # range(11)
+probs = [13]  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]  # range(11)
 
 for prob in probs:
     if prob == 0:
@@ -30,7 +30,7 @@ for prob in probs:
 
         cd_solver.coordinate_descent(pb_toy, max_iter=100, verbose=0.5, print_style='smoothed_gap', min_change_in_x=0.)
 
-    if (prob >= 1 and prob <= 4) or prob == 6:
+    if (prob >= 1 and prob <= 4) or prob == 6 or prob == 11 or prob == 13:
         dataset = 'leukemia'
         data = fetch_mldata(dataset)
         X = data.data
@@ -145,7 +145,7 @@ for prob in probs:
                                             Ah=sp.csc_matrix(y)
                                                           )
         
-        cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=100, verbose=2., print_style='smoothed_gap', step_size_factor=alpha/1000)
+        cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=300, verbose=2., print_style='smoothed_gap', step_size_factor=alpha/1000, sampling='kink_half')
 
     if prob == 8:
         print("TV regularized least squares on toy dataset")
@@ -259,3 +259,73 @@ for prob in probs:
         
         cd_solver.coordinate_descent(pb_basic_lp, max_iter=1000000, verbose=1., max_time=10., print_style='smoothed_gap')
         
+    if prob == 11:
+        # Lasso
+        print("Lasso on Leukemia with kink detection")
+        pb_leukemia_lasso = cd_solver.Problem(N=X.shape[1],
+                                              f=["square"] * X.shape[0],
+                                              Af=X,
+                                              bf=y,
+                                              cf=[0.5] * X.shape[0],
+                                              g=["abs"] * X.shape[1],
+                                              cg=[0.1*np.linalg.norm(X.T.dot(y), np.inf)] * X.shape[1])
+
+        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=100,
+                                         verbose=5, print_style='smoothed_gap',
+                                         sampling='kink_half')
+
+    if prob == 12:
+        # multinomial logistic regression
+        print("Multinomial logistic regression on iris")
+        dataset = 'iris'
+        data = fetch_mldata(dataset)
+        X = data.data
+        X = sp.csc_matrix(X)
+        y = data.target
+        n_samples = X.shape[0]
+        n_features = X.shape[1]
+
+        # reorganise data, row blocks, one block per observation,
+        #   containing all classes and column blocks,
+        #   one block per feature, containing all classes.
+        n_class = 3
+        Y = np.array([y==1, y==2, y==3])
+        tmp = X.T.dot(1. / n_class - Y.T)
+        lambda_max = np.sqrt(np.max(np.sum(tmp*tmp, axis=1)))
+        Y = Y.T.ravel()  # .reshape((1, np.prod(Y.shape)))
+        XX = sp.kron(X, sp.eye(n_class))
+
+        N = XX.shape[1]
+
+        blocks = np.arange(0, XX.shape[1]+1, n_class)
+        f = ["logsumexp"] * (XX.shape[0] / n_class) + ["linear"]
+        Af = sp.vstack([XX, XX.T.dot(Y)], format='csc')
+        blocks_f = np.arange(0, XX.shape[0]+1, n_class)
+        blocks_f = np.concatenate((blocks_f, [blocks_f[-1]+1]))
+        
+        pb_iris_multinomial = cd_solver.Problem(N=N,
+                f=f,
+                Af=Af,
+                bf=np.concatenate((Y,[0])),
+                cf=[1.]*len(f),
+                blocks_f=blocks_f,
+                g=["norm2"]*n_features,
+                blocks=blocks,
+                cg=[0.5*lambda_max] * n_features)
+        
+        cd_solver.coordinate_descent(pb_iris_multinomial, max_iter=10000,
+                                         verbose=1, print_style='smoothed_gap',
+                                         sampling='kink_half', min_change_in_x=0)
+
+    if prob == 13:
+        # Sparse logistic regression
+        print("sparse logistic regression on Leukemia")
+        pb_leukemia_sparse_logreg = cd_solver.Problem(N=X.shape[1],
+                                               f=["log1pexp"] * X.shape[0],
+                                               Af=(X.T.multiply(y)).T,
+                                               bf=y,
+                                               cf=[1] * X.shape[0],
+                                               g=["abs"] * X.shape[1],
+                                               cg=[0.5*np.linalg.norm(X.T.dot(0.5 - (1+y)/2.),np.inf)] * X.shape[1])
+
+        cd_solver.coordinate_descent(pb_leukemia_sparse_logreg, max_iter=150, verbose=2., print_style='smoothed_gap')

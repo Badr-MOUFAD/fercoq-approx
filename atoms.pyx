@@ -62,7 +62,10 @@ cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int
         if func_string[1] == "i":
             return linear(x, buff, nb_coord, mode, prox_param)
         elif func_string[1] == "o":
-            return log1pexp(x, buff, nb_coord, mode, prox_param)
+            if func_string[3] == "1":
+                return log1pexp(x, buff, nb_coord, mode, prox_param)
+            if func_string[3] == "s":
+                return logsumexp(x, buff, nb_coord, mode, prox_param)
     elif func_string[0] == "b":
         return box_zero_one(x, buff, nb_coord, mode, prox_param)
     elif func_string[0] == "e":
@@ -71,7 +74,7 @@ cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int
         return ineq_const(x, buff, nb_coord, mode, prox_param)
     elif func_string[0] == "z":
         return zero(x, buff, nb_coord, mode, prox_param)
-    # TODO: logsumexp, quadratic...
+    # TODO: quadratic...
 
 
 cdef DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
@@ -89,6 +92,8 @@ cdef DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE 
     elif mode == LIPSCHITZ:
         buff[0] = 2.
         return buff[0]
+    elif mode == IS_KINK:
+        return 0
     elif mode == VAL_CONJ:
         return val_conj_not_implemented("square", x, buff, nb_coord)
     else:  # mode == VAL
@@ -127,6 +132,11 @@ cdef DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pro
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == IS_KINK:
+        for i in range(nb_coord):
+            if x[i] != 0:
+                return 0
+        return 1
     elif mode == VAL_CONJ:
         return val_conj_not_implemented("abs", x, buff, nb_coord)
     else:  # mode == VAL
@@ -162,6 +172,11 @@ cdef DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE p
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == IS_KINK:
+        for i in range(nb_coord):
+            if x[i] != 0:
+                return 0
+        return 1
     elif mode == VAL_CONJ:
         if val > 1.00000001:
             return INF
@@ -185,6 +200,8 @@ cdef DOUBLE linear(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE 
     elif mode == LIPSCHITZ:
         buff[0] = 0.
         return buff[0]
+    elif mode == IS_KINK:
+        return 0
     elif mode == VAL_CONJ:
         return val_conj_not_implemented("linear", x, buff, nb_coord)
     else:  # mode == VAL
@@ -214,6 +231,8 @@ cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
     elif mode == LIPSCHITZ:
         buff[0] = 1. / 4.
         return buff[0]
+    elif mode == IS_KINK:
+        return 0
     elif mode == VAL_CONJ:
         return val_conj_not_implemented("log1pexp", x, buff, nb_coord)
     else:  # mode == VAL
@@ -223,8 +242,41 @@ cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
             else:
                 val += log(1.+exp(x[i]))
         return val
-    
 
+
+cdef DOUBLE logsumexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+    # Function log(exp(x_0)+...+exp(x_n))
+    cdef int i
+    cdef DOUBLE max_x = x[0]
+    cdef DOUBLE sum_exp_x = 0.
+
+    if mode == GRAD or mode == VAL:
+        for i in range(1, nb_coord):
+            if x[i] > max_x:
+                max_x = x[i]
+        for i in range(nb_coord):
+            sum_exp_x += exp(x[i] - max_x)
+
+    if mode == GRAD:
+        for i in range(nb_coord):
+            buff[i] = exp(x[i] - max_x) / sum_exp_x
+        return buff[0]
+    elif mode == PROX:
+        # not coded yet
+        for i in range(nb_coord):
+            buff[i] = 1e30
+        return buff[0]
+    elif mode == LIPSCHITZ:
+        buff[0] = 0.5
+        return buff[0]
+    elif mode == IS_KINK:
+        return 0
+    elif mode == VAL_CONJ:
+        return val_conj_not_implemented("logsumexp", x, buff, nb_coord)
+    else:  # mode == VAL
+        return max_x + log(sum_exp_x)
+
+    
 cdef DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x in [0,1]
     cdef int i
@@ -240,6 +292,11 @@ cdef DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, D
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == IS_KINK:
+        for i in range(nb_coord):
+            if x[i] > 0 and x[i] < 1:
+                return 0
+        return 1
     elif mode == VAL_CONJ:
         return val_conj_not_implemented("box_zero_one", x, buff, nb_coord)
     else:  # mode == VAL
@@ -266,6 +323,8 @@ cdef DOUBLE eq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == IS_KINK:
+        return 1
     elif mode == VAL_CONJ:
         return 0.
         # return val_conj_not_implemented("eq_const", x, buff, nb_coord)
@@ -293,6 +352,11 @@ cdef DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOU
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
+    elif mode == IS_KINK:
+        for i in range(nb_coord):
+            if x[i] > 0:
+                return 0
+        return 1
     elif mode == VAL_CONJ:
         return val_conj_not_implemented("ineq_const", x, buff, nb_coord)
     else:  # mode == VAL
@@ -316,6 +380,8 @@ cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pr
     elif mode == LIPSCHITZ:
         buff[0] = 0.
         return buff[0]
+    elif mode == IS_KINK:
+        return 0
     elif mode == VAL_CONJ:
         return val_conj_not_implemented("zero", x, buff, nb_coord)
     else:  # mode == VAL
