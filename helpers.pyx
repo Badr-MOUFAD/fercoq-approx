@@ -205,7 +205,7 @@ def check_grad(f, x, nb_coord=1, shift=1e-6):
     cdef int i
     cdef DOUBLE error = 0.
     for i in range(nb_coord):
-        x_shift[i] = x[i] + 1e-6
+        x_shift[i] = x[i] + shift
         grad_finite_diffs[i] = (my_eval(f, x_shift, grad, nb_coord=nb_coord, mode=VAL)
                                     - my_eval(f, x_, grad, nb_coord=nb_coord, mode=VAL)) / 1e-6
         x_shift[i] = x[i]
