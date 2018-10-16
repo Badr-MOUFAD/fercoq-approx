@@ -4,15 +4,11 @@
 
 from libc.math cimport fabs, sqrt, log2, log, exp
 cimport numpy as np
-import numpy as np
-from scipy import linalg
 
 cimport cython
-import warnings
-from libc.stdlib cimport malloc, free
 
 ctypedef np.float64_t DOUBLE
-ctypedef np.int32_t INT32_t
+ctypedef np.uint32_t UINT32_t
 
 
 cdef enum MODE:

@@ -4,6 +4,7 @@ import numpy as np
 
 import scipy.sparse as sp
 import cd_solver
+from helpers import check_grad
 
 # imports for loading datasets
 from scipy import io
@@ -13,8 +14,20 @@ from sklearn.datasets.mldata import fetch_mldata
 #sys.path.append("../tv_l1_solver")
 #from load_poldrack import load_gain_poldrack
 
+# Check gradients
+print('Testing gradients:')
+test = check_grad('square', [1], nb_coord=1)
+print('square', test[0])
+test = check_grad('linear', [1], nb_coord=1)
+print('linear', test[0])
+test = check_grad('log1pexp', [1], nb_coord=1)
+print('log1pexp', test[0])
+test = check_grad('logsumexp', [1, -2, 3], nb_coord=3)
+print('logsumexp', test[0])
 
-probs = [13]  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]  # range(11)
+
+
+probs = range(1,4)  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]
 
 for prob in probs:
     if prob == 0:
@@ -194,51 +207,53 @@ for prob in probs:
 
 
     if prob == 9:
-        print("l1+TV regularized least squares on fmri dataset")
+        try:
+            print("l1+TV regularized least squares on fmri dataset")
 
-        mem = Memory(cachedir='cache', verbose=3)
-        X, y, subjects, mask, affine = mem.cache(load_gain_poldrack)(smooth=0, folder='../tv_l1_solver')
+            mem = Memory(cachedir='cache', verbose=3)
+            X, y, subjects, mask, affine = mem.cache(load_gain_poldrack)(smooth=0, folder='../tv_l1_solver')
 
-        l1_ratio = 0.5
-        alpha = 1e-2
+            l1_ratio = 0.5
+            alpha = 1e-2
 
-        integer_mask = np.cumsum(mask).reshape(mask.shape) * mask
-        ravelling_array = np.cumsum(mask==mask).reshape(mask.shape) - 1
-        correspondance = ravelling_array[mask]
+            integer_mask = np.cumsum(mask).reshape(mask.shape) * mask
+            ravelling_array = np.cumsum(mask==mask).reshape(mask.shape) - 1
+            correspondance = ravelling_array[mask]
 
-        N = np.prod(mask.shape)
+            N = np.prod(mask.shape)
 
-        X = sp.csr_matrix(X)
-        Af = sp.csr_matrix((X.data, correspondance[X.indices], X.indptr), (X.shape[0], N))
+            X = sp.csr_matrix(X)
+            Af = sp.csr_matrix((X.data, correspondance[X.indices], X.indptr), (X.shape[0], N))
 
-        Dx = sp.diags([-np.ones(mask.shape[0]), np.ones(mask.shape[0])], offsets=[0, 1])
-        Dy = sp.diags([-np.ones(mask.shape[1]), np.ones(mask.shape[1])], offsets=[0, 1])
-        Dz = sp.diags([-np.ones(mask.shape[2]), np.ones(mask.shape[2])], offsets=[0, 1])
+            Dx = sp.diags([-np.ones(mask.shape[0]), np.ones(mask.shape[0])], offsets=[0, 1])
+            Dy = sp.diags([-np.ones(mask.shape[1]), np.ones(mask.shape[1])], offsets=[0, 1])
+            Dz = sp.diags([-np.ones(mask.shape[2]), np.ones(mask.shape[2])], offsets=[0, 1])
 
-        Dx = sp.kron(Dx, sp.eye(mask.shape[1]*mask.shape[2]))
-        Dy = sp.kron(sp.eye(mask.shape[0]), sp.kron(Dy, sp.eye(mask.shape[2])))
-        Dz = sp.kron(sp.eye(mask.shape[0]*mask.shape[1]), Dz)
+            Dx = sp.kron(Dx, sp.eye(mask.shape[1]*mask.shape[2]))
+            Dy = sp.kron(sp.eye(mask.shape[0]), sp.kron(Dy, sp.eye(mask.shape[2])))
+            Dz = sp.kron(sp.eye(mask.shape[0]*mask.shape[1]), Dz)
         
-        threeDgradient = sp.vstack([Dx, Dy, Dz], format='csc')
-        threeDgradient.eliminate_zeros()
-        # reorder the matrix
-        threeDgradient = sp.csc_matrix((threeDgradient.data, 3 * (threeDgradient.indices % N) + threeDgradient.indices // N, threeDgradient.indptr), (3*N, N))
+            threeDgradient = sp.vstack([Dx, Dy, Dz], format='csc')
+            threeDgradient.eliminate_zeros()
+            # reorder the matrix
+            threeDgradient = sp.csc_matrix((threeDgradient.data, 3 * (threeDgradient.indices % N) + threeDgradient.indices // N, threeDgradient.indptr), (3*N, N))
         
-        pb_fmri_tvl1 = cd_solver.Problem(N=N,
-                                        f=["square"] * X.shape[0],
-                                        Af=Af,
-                                        bf=y,
-                                        cf=[0.5] * X.shape[0],
-                                        g=["abs"] * N,
-                                        cg=[alpha*l1_ratio] * N,
-                                        h=["norm2"] * N,
-                                        ch=[(1-l1_ratio)] * N,
-                                        blocks_h=np.arange(0, 3*N + 1, 3),
-                                        Ah=alpha*threeDgradient
-                                        )
+            pb_fmri_tvl1 = cd_solver.Problem(N=N,
+                                                 f=["square"] * X.shape[0],
+                                                 Af=Af,
+                                                 bf=y,
+                                                 cf=[0.5] * X.shape[0],
+                                                 g=["abs"] * N,
+                                                 cg=[alpha*l1_ratio] * N,
+                                                 h=["norm2"] * N,
+                                                 ch=[(1-l1_ratio)] * N,
+                                                 blocks_h=np.arange(0, 3*N + 1, 3),
+                                                 Ah=alpha*threeDgradient
+                                                 )
 
-        cd_solver.coordinate_descent(pb_fmri_tvl1, max_iter=100, verbose=20., max_time=100., step_size_factor=10., print_style='smoothed_gap')
-
+            cd_solver.coordinate_descent(pb_fmri_tvl1, max_iter=100, verbose=20., max_time=100., step_size_factor=10., print_style='smoothed_gap')
+        except:
+            print('fMRI dataset not loaded')
     if prob == 10:
         # LP  --  min c.dot(x) : Mx <= b
         print('basic LP')
@@ -249,14 +264,14 @@ for prob in probs:
         b = np.array([41,17,24])
 
         pb_basic_lp = cd_solver.Problem(N=n,
-                                f=["linear"],
-                                Af=c,
-                                g=["ineq_const"]*n,
-                                h=["ineq_const"]*d,
-                                Ah=-M,
-                                bh=-b
-                                )
-        
+                                            f=["linear"],
+                                            Af=c,
+                                            g=["ineq_const"]*n,
+                                            h=["ineq_const"]*d,
+                                            Ah=-M,
+                                            bh=-b
+                                            )
+
         cd_solver.coordinate_descent(pb_basic_lp, max_iter=1000000, verbose=1., max_time=10., print_style='smoothed_gap')
         
     if prob == 11:
@@ -313,7 +328,7 @@ for prob in probs:
                 blocks=blocks,
                 cg=[0.5*lambda_max] * n_features)
         
-        cd_solver.coordinate_descent(pb_iris_multinomial, max_iter=10000,
+        cd_solver.coordinate_descent(pb_iris_multinomial, max_iter=5000,
                                          verbose=1, print_style='smoothed_gap',
                                          sampling='kink_half', min_change_in_x=0)
 

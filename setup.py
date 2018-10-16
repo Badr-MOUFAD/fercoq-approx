@@ -16,6 +16,12 @@ def configuration():
     config.add_extension(name='atoms',
                          sources=['atoms.cpp'])
     
+    config.add_extension(name='helpers',
+                         sources=['helpers.cpp'])
+    
+    config.add_extension(name='algorithms',
+                         sources=['algorithms.cpp'])
+    
     config.add_extension(name='cd_solver',
                          sources=['cd_solver.cpp'])
         

@@ -2,16 +2,6 @@
 # cython --cplus -X boundscheck=False atoms.pyx
 
 # definitions in atoms.pxd
-#from libc.math cimport fabs, sqrt, log2
-#cimport numpy as np
-#import numpy as np
-#from scipy import linalg
-#
-#cimport cython
-#import warnings
-#
-#ctypedef np.float64_t DOUBLE
-#ctypedef np.int32_t INT32_t
 
 cdef DOUBLE INF = 1e30
 
@@ -158,7 +148,8 @@ cdef DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE p
         if val != 0:
             for i in range(nb_coord):
                 buff[i] = x[i] / val
-            else:
+        else:
+            for i in range(nb_coord):
                 buff[i] = 0
         return buff[0]
     elif mode == PROX:
