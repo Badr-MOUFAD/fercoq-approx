@@ -44,8 +44,12 @@ cdef void one_step_coordinate_descent(int ii, DOUBLE[:] x,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
+    # Algorithm described in O. Fercoq and P. Bianchi (2015).
+    #     A coordinate descent primal-dual algorithm with large step size
+    #     and possibly non separable functions. arXiv preprint arXiv:1508.04625.
 
     cdef UINT32_t i, coord, j, jh, l, lh, jj, j_prev
+    j = j_prev = -10
     cdef UINT32_t nb_coord = blocks[ii+1] - blocks[ii]
     cdef DOUBLE dy
 
@@ -108,8 +112,8 @@ cdef void one_step_coordinate_descent(int ii, DOUBLE[:] x,
         for i in range(nb_coord):
             coord = blocks[ii] + i
             buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
-        my_eval(g[ii], buff_x, buff, nb_coord=nb_coord,
-                    mode=PROX, prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size[ii])
+        my_eval(g[ii], buff_x, buff, nb_coord=nb_coord, mode=PROX,
+            prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size[ii])
         for i in range(nb_coord):
             coord = blocks[ii] + i
             x[coord] = (buff[i] + bg[coord])/ Dg_data[ii]
@@ -130,17 +134,54 @@ cdef void one_step_coordinate_descent(int ii, DOUBLE[:] x,
     return
 
 
-cdef DOUBLE next_theta(DOUBLE theta, int h_present==0) nogil:
-    return theta  # todo
+# c function to solve the cubic
+cdef DOUBLE root3(DOUBLE a, DOUBLE b, DOUBLE c, DOUBLE d) nogil:
+    """
+    Finds the unique positive root of
+    a X**3 + b X**2 + c X + d  when a, b, c > 0 and d < 0
+    cf https://en.wikipedia.org/wiki/Cubic_function for the formulas
+    """
+    cdef DOUBLE p
+    cdef DOUBLE q
+    cdef DOUBLE t
+    cdef DOUBLE angle
+    cdef DOUBLE r
+
+    p = (3 * a * c - pow(b, 2) ) / 3. / pow(a,2)
+    q = (2 * pow(b,3) - 9 * a * b * c + 27 * pow(a,2) * d) / 27. / pow(a,3)
+    
+    if 4 * pow(p,3) + 27 * pow(q,2) <= 0:  # three real roots
+        angle = 1./3. * acos(3./2. * q / p * sqrt(-3 / p))
+        t = 2 * sqrt(- p / 3.) * \
+          fmax(fmax(cos(angle), cos(angle + 2./3. * M_PI)),
+                   cos(angle - 2./3. * M_PI))
+    else:  # one real root
+        if p < 0:
+            t = - 2 * copysign(sqrt(-p / 3.), q) * \
+            cosh(1./3. * acosh(-3./2. * fabs(q) / p * sqrt(-3 / p)))
+        else:
+            t = - 2 * sqrt(p / 3.) * \
+            sinh(1./3. * asinh(3./2. * q / p * sqrt(3 / p)))
+    r = t - b / 3. / a
+    return r
+
+
+cdef DOUBLE next_theta(DOUBLE theta, int h_present=0) nogil:
+    cdef DOUBLE theta2 = theta * theta
+    if h_present is False:
+        theta = (sqrt(theta2 * theta2 + 4 * theta2) - theta2) / 2.
+    else:
+        theta = root3(1., 1., theta2, -theta2)
+    return theta
 
 
 cdef void one_step_accelerated_coordinate_descent(int ii, DOUBLE[:] x,
         DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] y_center, DOUBLE[:] prox_y,
-        DOUBLE[:] rhxe, DOUBLE[:] rhxc, DOUBLE[:] rfe, DOUBLE[:] rfx,
-        DOUBLE[:] rhy_ii, DOUBLE* theta, DOUBLE theta0, DOUBLE* c_theta,
+        DOUBLE[:] rhxe, DOUBLE[:] rhxc, DOUBLE[:] rfe, DOUBLE[:] rfc,
+        DOUBLE[:] rhy, DOUBLE* theta, DOUBLE theta0, DOUBLE* c_theta,
         DOUBLE* beta,
-        DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
-        DOUBLE[:] grad,
+        DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] xe_ii,
+        DOUBLE[:] xc_ii, DOUBLE[:] grad,
         UINT32_t[:] blocks, UINT32_t[:] blocks_f, UINT32_t[:] blocks_h,
         UINT32_t[:] Af_indptr, UINT32_t[:] Af_indices, DOUBLE[:] Af_data,
         DOUBLE[:] cf, DOUBLE[:] bf,
@@ -152,18 +193,32 @@ cdef void one_step_accelerated_coordinate_descent(int ii, DOUBLE[:] x,
         DOUBLE[:] ch, DOUBLE[:] bh,
         unsigned char** f, unsigned char** g, unsigned char** h,
         int f_present, int g_present, int h_present,
-        DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
-        DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
+        DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah, DOUBLE* change_in_x) nogil:
+    # if h_present is False and restart_period == 0:
+    # Algorithm described in O. Fercoq and P. Richtárik. (2015).
+    #   Accelerated, parallel, and proximal coordinate descent.
+    #   SIAM Journal on Optimization, 25(4), 1997-2023.
+    # if h_present is False and restart_period > 0:
+    # Algorithm described in O. Fercoq and Z. Qu. (2018).
+    #   Restarting the accelerated coordinate descent method with a rough
+    #   strong convexity estimate. arXiv preprint arXiv:1803.05771.
+    # if h_present is True:
+    # Algorithm described in A. Alacaoglu, Q. Tran-Dinh, O. Fercoq and V. Cevher.
+    #   (2017). Smooth primal-dual coordinate descent algorithms for nonsmooth
+    #   convex optimization. In NIPS proceedings (pp. 5852-5861).
 
     cdef UINT32_t i, coord, j, jh, l, lh, jj, j_prev
+    j = j_prev = -10
+    cdef DOUBLE primal_step_size = 1 / (Lf[ii] + norm2_columns_Ah[ii] / beta[0])
     cdef UINT32_t nb_coord = blocks[ii+1] - blocks[ii]
     cdef DOUBLE dy
 
     if h_present is True:
-        # initialize rhy_ii
+        # dual_step_size[:] = 1. / beta[0]
+        # initialize rhy[blocks[ii]:blocks[ii+1]]
         for i in range(nb_coord):
             coord = blocks[ii] + i
-            rhy_ii[i] = 0
+            rhy[coord] = 0
 
         # Apply prox of h* in the dual space
         for i in range(dual_vars_to_update[ii][0]):
@@ -173,12 +228,11 @@ cdef void one_step_accelerated_coordinate_descent(int ii, DOUBLE[:] x,
             if (i == 0 or j != inv_blocks_h[Ah_indices[dual_vars_to_update[ii][i]]]):
                 for l in range(blocks_h[j+1]-blocks_h[j]):
                     jj = blocks_h[j]+l
-                    buff_y[l] = y_center[jj] + (rhxe[jj] + c_theta[0] * rhxc[jj]) \
-                                        * dual_step_size[jh]
+                    buff_y[l] = y_center[jj] + (rhxe[jj] + c_theta[0] * rhxc[jj]) / beta[0]
                 my_eval(h[j], buff_y, buff,
                             nb_coord=blocks_h[j+1]-blocks_h[j],
                             mode=PROX_CONJ,
-                            prox_param=dual_step_size[jh],
+                            prox_param=1./beta[0],
                             prox_param2=ch[j])
                 for l in range(blocks_h[j+1]-blocks_h[j]):
                     jj = blocks_h[j]+l
@@ -189,7 +243,8 @@ cdef void one_step_accelerated_coordinate_descent(int ii, DOUBLE[:] x,
 
     for i in range(nb_coord):
         coord = blocks[ii] + i
-        x_ii[i] = xe[coord]
+        xe_ii[i] = xe[coord]
+        xc_ii[i] = xc[coord]
 
         # Compute gradient of f and do gradient step
         if f_present is True:
@@ -208,39 +263,65 @@ cdef void one_step_accelerated_coordinate_descent(int ii, DOUBLE[:] x,
                 # else: we have already computed it
                 #   good for dense Af but not optimal for diagonal Af
                 grad[i] += cf[j] * Af_data[l] * buff[jj - blocks_f[j]]
-            xe[coord] -= primal_step_size[ii] * theta0 / theta[0] * grad[i]
+            xe[coord] -= primal_step_size * theta0 / theta[0] * grad[i]
         if h_present is True:
-            xe[coord] -= primal_step_size[ii] * theta0 / theta[0] * rhy_ii[i]
+            xe[coord] -= primal_step_size * theta0 / theta[0] * rhy[coord]
 
     # Apply prox of g
     if g_present is True:
         for i in range(nb_coord):
             coord = blocks[ii] + i
             buff_x[i] = Dg_data[ii] * xe[coord] - bg[coord]
-        my_eval(g[ii], buff_x, buff, nb_coord=nb_coord,
-                    mode=PROX, prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size[ii]*theta0/theta[0])
+        my_eval(g[ii], buff_x, buff, nb_coord=nb_coord, mode=PROX,
+            prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size*theta0/theta[0])
         for i in range(nb_coord):
             coord = blocks[ii] + i
             xe[coord] = (buff[i] + bg[coord])/ Dg_data[ii]
 
     for i in range(nb_coord):
         coord = blocks[ii] + i
-        xc[coord] -= (xe[coord] - x_ii[i]) * \
-                         (1 - theta[0] / theta0) / c_theta[0]
+        xc[coord] -= (xe[coord] - xe_ii[i]) * \
+                         (1. - theta[0] / theta0) / c_theta[0]
 
-
-    ####  ----------  To code from here -------- ####
     # Update residuals
     for i in range(nb_coord):
         coord = blocks[ii] + i
-        if x_ii[i] != x[coord]:
+        if xe_ii[i] != xe[coord]:
             if f_present is True:
                 for l in range(Af_indptr[coord], Af_indptr[coord+1]):
                     j = Af_indices[l]
-                    rf[j] += Af_data[l] * (x[coord] - x_ii[i])
+                    rfe[j] += Af_data[l] * (xe[coord] - xe_ii[i])
+                    rfc[j] += Af_data[l] * (xc[coord] - xc_ii[i])
+                    
             if h_present is True:
                 for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                     jh = Ah_indices[lh]
-                    rhx[jh] += Ah_data[lh] * (x[coord] - x_ii[i])
-            change_in_x[0] += fabs(x_ii[i] - x[coord])
+                    rhxe[jh] += Ah_data[lh] * (xe[coord] - xe_ii[i])
+                    rhxc[jh] += Ah_data[lh] * (xc[coord] - xc_ii[i])
+            change_in_x[0] += fabs(xe_ii[i] - xe[coord])
+
+    # Update momentum parameters
+    c_theta[0] *= (1. - theta[0])
+    theta[0] = next_theta(theta[0], h_present)
+    if h_present is True:
+        beta[0] /= (1. + theta[0])
+    
     return
+
+
+def variable_restart(restart_history, iter, restart_period, next_period):
+    if (iter % next_period) != next_period - 1:
+        return (False, next_period)
+    else:
+        j = 0
+        while j < len(restart_history) and restart_history[j] == 1:
+            j += 1
+        for i in range(j):
+            restart_history[i] = 0
+        if j < len(restart_history):
+            restart_history[j] = 1
+        else:
+            restart_history.append(1)
+
+        return (True, restart_period * 2**j)
+        

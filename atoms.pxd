@@ -3,6 +3,8 @@
 
 
 from libc.math cimport fabs, sqrt, log2, log, exp
+from libc.math cimport pow, cos, acos, sinh, cosh, asinh, acosh, copysign, fmax
+from libc.math cimport M_PI
 cimport numpy as np
 
 cimport cython

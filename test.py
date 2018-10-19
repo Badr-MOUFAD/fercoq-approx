@@ -1,6 +1,7 @@
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 
 import numpy as np
+import copy
 
 import scipy.sparse as sp
 import cd_solver
@@ -27,7 +28,7 @@ print('logsumexp', test[0])
 
 
 
-probs = range(1,4)  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]
+probs = [5]  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]
 
 for prob in probs:
     if prob == 0:
@@ -61,7 +62,12 @@ for prob in probs:
                                               g=["abs"] * X.shape[1],
                                               cg=[0.1*np.linalg.norm(X.T.dot(y), np.inf)] * X.shape[1])
 
-        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=100, verbose=5, print_style='smoothed_gap')
+        pb_leukemia_lasso_acc = copy.copy(pb_leukemia_lasso)
+        
+        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=100, verbose=1, print_style='smoothed_gap')
+
+        print("Lasso on Leukemia with momentum and variable restart")
+        cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=100, verbose=1, print_style='smoothed_gap', accelerated=True, restart_period=4)
 
     if prob == 2:
         # Logistic regression
@@ -116,7 +122,12 @@ for prob in probs:
 
         pb_toy_const = cd_solver.Problem(N=2, f=f, Af=Af, bf=bf, cf=cf, h=h, Ah=Ah)
 
-        cd_solver.coordinate_descent(pb_toy_const, max_iter=100, verbose=0.001, print_style='smoothed_gap')
+        pb_toy_const_smartcd = copy.copy(pb_toy_const)
+
+        cd_solver.coordinate_descent(pb_toy_const, max_iter=1000, verbose=0.001, print_style='smoothed_gap')
+
+        print('basic problem with constraints by SMART-CD')
+        cd_solver.coordinate_descent(pb_toy_const_smartcd, max_iter=1000, verbose=0.01, print_style='smoothed_gap', accelerated=True, restart_period=10)
 
     if prob == 6:
         # SVM with intercept
@@ -129,7 +140,7 @@ for prob in probs:
                                             Af=sp.vstack([Xred.T * y, -np.ones((1,X.shape[0]))], format="csc"),
                                             bf=np.zeros(Xred.shape[1]+1),
                                             cf=[0.5/alpha] * Xred.shape[1] + [1],
-                                            # g=["box_zero_one"] * X.shape[0],
+                                            g=["box_zero_one"] * X.shape[0],
                                             h=["eq_const"],
                                             Ah=sp.csc_matrix(y)
                                                           )

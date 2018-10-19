@@ -15,7 +15,8 @@ import time
 
 from helpers cimport compute_primal_value, compute_smoothed_gap
 from algorithms cimport one_step_coordinate_descent
-from algorithms import find_dual_variables_to_update
+from algorithms cimport one_step_accelerated_coordinate_descent
+from algorithms import find_dual_variables_to_update, variable_restart
 
 # The following three functions are copied from Scikit Learn.
 
@@ -165,7 +166,7 @@ class Problem:
             self.bh = np.array(bh, dtype=float)
             self.blocks_h = np.array(blocks_h, dtype=np.uint32)
             if y_init == None:
-                  y_init = np.zeros(self.Ah.nnz)
+                  y_init = np.zeros(self.Ah.shape[0])
             self.y_init = y_init
             self.h_takes_infinite_values = h_takes_infinite_values
 
@@ -174,7 +175,8 @@ class Problem:
 def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                            verbose=0, print_style='classical',
                            min_change_in_x=1e-15, step_size_factor=1.,
-                           sampling='uniform', callback=None):
+                           sampling='uniform', accelerated=False,
+                           restart_period=0, callback=None):
     # pb is a Problem as defined above
     # max_iter: maximum number of passes over the data
     # max_time: in seconds
@@ -183,6 +185,10 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     # min_change_in_x: stopping criterion
     # step_size_factor: number to balance primal and dual step sizes
     # sampling: either 'uniform' or 'kink_half'
+    # accelerated: if True, the algorithm with momentum is implemented
+    # restart_period: initial restart period for accelerated method
+    #
+    # For details on the algorithms, see algorithms.pyx
     
     #--------------------- Prepare data ----------------------#
     
@@ -192,7 +198,9 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
 
     # Problem pb
     cdef DOUBLE[:] x = pb.x_init.copy()
-    cdef DOUBLE[:] y = pb.y_init.copy()
+    cdef DOUBLE[:] y
+    cdef DOUBLE[:] y_center
+
     cdef UINT32_t N = pb.N
     cdef UINT32_t[:] blocks = pb.blocks
     cdef UINT32_t[:] blocks_f = pb.blocks_f
@@ -212,7 +220,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     cdef UINT32_t[:] Ah_indices = np.array(pb.Ah.indices, dtype=np.uint32)  # I do not know why but the order of the indices is changed here...
     cdef DOUBLE[:] Ah_data = np.array(pb.Ah.data, dtype=float)  # Fortunately, it seems that the same thing happens here.
     cdef UINT32_t[:] Ah_nnz_perrow = np.array((pb.Ah!=0).sum(axis=1), dtype=np.uint32).ravel()
-            
+    
     cdef DOUBLE[:] bh = pb.bh
 
     cdef int f_present = pb.f_present
@@ -221,6 +229,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         f = <unsigned char**>malloc(len(pb.f)*sizeof(char*))
         for j in range(len(pb.f)):
             f[j] = <bytes>pb.f[j]
+    else:
+        f = <unsigned char**>malloc(0)  # just to remove uninitialized warning
 
     cdef int g_present = pb.g_present
     cdef unsigned char** g
@@ -228,6 +238,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         g = <unsigned char**>malloc(len(pb.g)*sizeof(char*))
         for ii in range(len(pb.g)):
             g[ii] = <bytes>pb.g[ii]
+    else:
+        g = <unsigned char**>malloc(0)  # just to remove uninitialized warning
 
     cdef int h_present = pb.h_present
     cdef unsigned char** h
@@ -235,7 +247,28 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         h = <unsigned char**>malloc(len(pb.h)*sizeof(char*))
         for jh in range(len(pb.h)):
             h[jh] = <bytes>pb.h[jh]
+    else:
+        h = <unsigned char**>malloc(0)  # just to remove uninitialized warning
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
+
+    # We have two kind of dual vectors so the user may use any of them to initialize
+    if accelerated == False:
+        if pb.y_init.shape[0] == pb.Ah.nnz or h_present is False:
+            y = pb.y_init.copy()
+        else:
+            y = np.zeros(pb.Ah.nnz, dtype=float)
+            for i in range(N):
+                for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
+                    y[lh] = pb.y_init[Ah_indices[lh]]
+    else:
+        if pb.y_init.shape[0] == pb.Ah.shape[0] or h_present is False:
+            y_center = pb.y_init.copy()
+        else:
+            y_center = np.zeros(pb.Ah.shape[0], dtype=float)
+            for i in range(N):
+                for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
+                    # we take only the last copy of pb.y_init[lh]
+                    y_center[Ah_indices[lh]] = pb.y_init[lh]
 
     cdef UINT32_t[:] inv_blocks_f = np.zeros(pb.Af.shape[0], dtype=np.uint32)
 
@@ -281,13 +314,37 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         rhx = pb.Ah * x - pb.bh
     else:
         rhx = np.empty(0)
-    cdef DOUBLE[:] Sy = np.zeros(pb.Ah.shape[0])  # Sy is the mean of the duplicates of y
     cdef DOUBLE[:] rhy = np.zeros(pb.Ah.shape[1])
-    if h_present is True:
+    cdef DOUBLE[:] Sy
+    if h_present is True and accelerated is False:
+        Sy = np.zeros(pb.Ah.shape[0])  # Sy is the mean of the duplicates of y
         for i in range(N):
             for l in range(Ah_indptr[i], Ah_indptr[i+1]):
                 Sy[Ah_indices[l]] += y[l] / Ah_nnz_perrow[Ah_indices[l]]
                 rhy[i] += Ah_data[l] * y[l]
+
+    # Arrays for accelerated version
+    cdef DOUBLE[:] xe
+    cdef DOUBLE[:] xc
+    cdef DOUBLE[:] rfe
+    cdef DOUBLE[:] rfc
+    cdef DOUBLE[:] rhxe
+    cdef DOUBLE[:] rhxc
+    if accelerated == True:
+        xe = x.copy()
+        xc = np.zeros(x.shape[0])
+        rfe = np.array(rf).copy()
+        rfc = np.zeros(rf.shape[0])
+        rhxe = np.array(rhx).copy()
+        rhxc = np.zeros(rhx.shape[0])
+            
+    cdef DOUBLE theta0 = 1. / n
+    cdef DOUBLE theta = theta0
+    cdef DOUBLE c_theta = 1.
+    cdef DOUBLE beta0 = 0
+    cdef DOUBLE beta
+    restart_history = []
+    next_period = restart_period
 
     cdef UINT32_t rand_r_state_seed = np.random.randint(RAND_R_MAX)
     cdef UINT32_t* rand_r_state = &rand_r_state_seed
@@ -302,6 +359,11 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] buff_x = np.zeros(max_nb_coord)
     cdef DOUBLE[:] buff_y = np.zeros(max_nb_coord_h)
     cdef DOUBLE[:] buff = np.zeros(max(max_nb_coord, max_nb_coord_h))
+    cdef DOUBLE[:] xc_ii
+    cdef DOUBLE[:] xe_ii
+    if accelerated == True:
+        xc_ii = np.zeros(max_nb_coord)
+        xe_ii = np.zeros(max_nb_coord)
 
     # Compute Lipschitz constants
     cdef DOUBLE[:] tmp_Lf = np.zeros(len(pb.f))
@@ -311,7 +373,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] Lf = 1e-30 * np.ones(n)
     if f_present is True:
         for ii in range(n):
-            # if block size is > 1, we use the inequality frobenius norm > 2-norm (not optimal)
+            # if block size is > 1, we use the inequality frobenius norm > 2-norm
+            #   (not optimal)
             for i in range(blocks[ii+1] - blocks[ii]):
                 coord = blocks[ii] + i
                 for l in range(Af_indptr[coord], Af_indptr[coord+1]):
@@ -321,29 +384,47 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     del tmp_Lf
     cdef DOUBLE[:] primal_step_size = 1. / np.array(Lf)
     cdef DOUBLE[:] dual_step_size = np.zeros(pb.Ah.shape[0])
+    cdef DOUBLE[:] norm2_columns_Ah = np.zeros(n)
     if h_present is True:
-        norm2_columns_Ah = np.array((pb.Ah.multiply(pb.Ah)).sum(axis=0)).ravel()
-        dual_step_size = np.max(np.maximum(1. / np.sqrt(norm2_columns_Ah + 1e-30),
-                                        np.array(Lf) / (norm2_columns_Ah + 1e-30))) \
-                            * step_size_factor * np.ones(pb.Ah.shape[0])
-        primal_step_size = 0.9 / (Lf + dual_step_size[0] * norm2_columns_Ah * np.max(np.array(Ah_nnz_perrow)))
+        if accelerated is True:
+            for i in range(n):
+                norm2_columns_Ah[i] = (pb.Ah[:,blocks[i]:blocks[i+1]]\
+                                .multiply(pb.Ah[:,blocks[i]:blocks[i+1]])).sum()
+        else:
+            for i in range(n):
+                norm2_columns_Ah[i] = ((pb.Ah[:,blocks[i]:blocks[i+1]]\
+                                .multiply(pb.Ah[:,blocks[i]:blocks[i+1]])).T\
+                                .multiply(np.array(Ah_nnz_perrow))).sum()
+        dual_step_size = np.maximum(
+            1. / np.sqrt(np.array(norm2_columns_Ah) + 1e-30),
+            np.array(Lf) / (np.array(norm2_columns_Ah) + 1e-30)) \
+                            * step_size_factor
+        if accelerated is True:
+            beta0 = 1. / np.max(np.array(dual_step_size))
+        else:
+            primal_step_size = 0.9 / (Lf + np.array(dual_step_size)
+                                          * np.array(norm2_columns_Ah))
 
-    cdef int sampling_law
-    if sampling == 'uniform':
-        sampling_law = 0
-    elif sampling == 'kink_half':
+    beta = beta0
+
+    cdef int sampling_law = 0  # default, uniform coordinate sampling probability
+    if sampling == 'kink_half':
         sampling_law = 1
-    cdef int focus_on_kink_or_not, n_active
+    cdef int focus_on_kink_or_not = 0
+    cdef int n_active = n
     cdef UINT32_t[:] active_set
     if sampling_law == 1:
         active_set = np.arange(n, dtype=np.uint32)
         n_active = n
+        if accelerated == True:
+            theta0 = 0.5 / n
+            theta = theta0
 
     cdef DOUBLE primal_val = 0.
     cdef DOUBLE infeas = 0.
     cdef DOUBLE dual_val = 0.
-    cdef DOUBLE beta = 0.
-    cdef DOUBLE gamma = 0.
+    cdef DOUBLE beta_print = 0.
+    cdef DOUBLE gamma_print = 0.
         
     cdef DOUBLE change_in_x
     cdef DOUBLE change_in_y
@@ -384,6 +465,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
             
         change_in_x = 0.
         change_in_y = 0.
+        
         for f_iter in range(n):
             if sampling_law == 0:
                 ii = rand_int(n, rand_r_state)
@@ -396,7 +478,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     ii = rand_int(n_active, rand_r_state)
                     ii = active_set[ii]
 
-            one_step_coordinate_descent(ii, x,
+            if accelerated == False:
+                one_step_coordinate_descent(ii, x,
                     y, Sy, prox_y, rhx, rf, rhy, rhy_ii,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
@@ -410,6 +493,34 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     f, g, h, f_present, g_present, h_present,
                     primal_step_size, dual_step_size,
                     &change_in_x, &change_in_y)
+            else:
+                one_step_accelerated_coordinate_descent(ii, x,
+                    xe, xc, y_center, prox_y, rhxe, rhxc, rfe, rfc,
+                    rhy, &theta, theta0, &c_theta, &beta,
+                    buff_x, buff_y, buff, xe_ii, xc_ii, grad,
+                    blocks, blocks_f, blocks_h,
+                    Af_indptr, Af_indices, Af_data, cf, bf,
+                    Dg_data, cg, bg, Ah_indptr, Ah_indices, Ah_data,
+                    inv_blocks_f, inv_blocks_h, Ah_nnz_perrow,
+                    Ah_col_indices, dual_vars_to_update, ch, bh,
+                    f, g, h, f_present, g_present, h_present,
+                    Lf, norm2_columns_Ah, &change_in_x)
+
+        if accelerated is True and restart_period > 0:
+            do_restart, next_period = variable_restart(restart_history,
+                                        iter, restart_period, next_period)
+            if do_restart is True:
+                xe = np.array(xe) + c_theta * np.array(xc)
+                rfe = np.array(rfe) + c_theta * np.array(rfc)
+                xc = np.zeros(x.shape[0])
+                rfc = np.zeros(rf.shape[0])
+                if h_present is True:
+                    rhxe = np.array(rhxe) + c_theta * np.array(rhxc)
+                    rhxc = np.zeros(rhx.shape[0])
+                    y_center = np.array(prox_y).copy()  # heuristic
+                theta = theta0
+                beta = beta0
+                c_theta = 1.
 
         elapsed_time = time.time() - init_time
         if verbose > 0:
@@ -417,6 +528,16 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     or change_in_x + change_in_y < min_change_in_x or elapsed_time > max_time
                     or iter >= max_iter-1):
                 # Compute value
+                if accelerated is True:
+                    for i in range(N):
+                        x[i] = xe[i] + c_theta * xc[i]
+                    if f_present is True:
+                        for j in range(pb.Af.shape[0]):
+                            rf[j] = rfe[j] + c_theta * rfc[j]
+                    if h_present is True:
+                        for l in range(pb.Ah.shape[0]):
+                            rhx[l] = rhxe[l] + c_theta * rhxc[l]
+                            
                 compute_primal_value(pb, f, g, h, x, rf, rhx, buff_x, buff_y, buff,
                                          &primal_val, &infeas)
                 if print_style == 'classical':
@@ -430,26 +551,37 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                         print("%.5f \t %d \t %+.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, change_in_x))
                 elif print_style == 'smoothed_gap':
-                    beta = infeas
+                    beta_print = infeas
                     if h_present is True:
-                        # Compute one more prox_h* in case Sy is not feasible
                         for j in range(len(pb.h)):
-                            for l in range(blocks_h[j+1]-blocks_h[j]):
-                                buff_y[l] = Sy[blocks_h[j]+l] \
-                                      + rhx[blocks_h[j]+l] * dual_step_size[jh]
+                            if accelerated == False:
+                                # Compute one more prox_h* in case Sy is not feasible
+                                for l in range(blocks_h[j+1]-blocks_h[j]):
+                                    buff_y[l] = Sy[blocks_h[j]+l] \
+                                      + rhx[blocks_h[j]+l] * dual_step_size[j]
+                            else:  # accelerated == True:
+                                # Compute dual vector
+                                for l in range(blocks_h[j+1]-blocks_h[j]):
+                                    buff_y[l] = y_center[blocks_h[j]+l] \
+                                      + rhx[blocks_h[j]+l] / beta
+
                             my_eval(h[j], buff_y, buff,
-                                    nb_coord=blocks_h[j+1]-blocks_h[j],
-                                    mode=PROX_CONJ,
-                                    prox_param=dual_step_size[jh],
-                                    prox_param2=ch[j])
+                                nb_coord=blocks_h[j+1]-blocks_h[j],
+                                mode=PROX_CONJ,
+                                prox_param=dual_step_size[j],
+                                prox_param2=ch[j])
                             for l in range(blocks_h[j+1]-blocks_h[j]):
                                 prox_y[blocks_h[j]+l] = buff[l]
+
                     smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
                                         rf, rhx, prox_y,
-                                        buff_x, buff_y, buff, &beta, &gamma)
+                                        buff_x, buff_y, buff,
+                                        &beta_print, &gamma_print)
                     
                     print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
-                              %(elapsed_time, iter, primal_val, infeas, smoothed_gap, beta, gamma, change_in_x, change_in_y))
+                              %(elapsed_time, iter, primal_val, infeas,
+                                smoothed_gap, beta_print, gamma_print,
+                                change_in_x, change_in_y))
 
                 nb_prints += 1
 
@@ -461,16 +593,16 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
             print("Not enough change in iterates (||x(t+1) - x(t)|| = %.5e): "
                       "stopping the algorithm" %change_in_x)
             break
-        
-    pb.sol = np.array(x).copy()
-    pb.dual_sol = np.array(Sy).copy()
-    pb.dual_sol_duplicated = np.array(y).copy()
 
-    if f_present is True:
-        free(f)
-    if g_present is True:
-        free(g)
-    if h_present is True:
-        free(h)
+    pb.sol = np.array(x).copy()
+    if accelerated is False:
+        pb.dual_sol = np.array(Sy).copy()
+        pb.dual_sol_duplicated = np.array(y).copy()
+    else:
+        pb.dual_sol = np.array(prox_y).copy()
+
+    free(f)
+    free(g)
+    free(h)
 
 
