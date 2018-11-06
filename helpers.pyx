@@ -4,6 +4,7 @@
 # C definitions in helpers.pxd
 
 import numpy as np
+import sys
 
 
 cdef void compute_primal_value(pb, unsigned char** f, unsigned char** g, unsigned char** h,
@@ -196,18 +197,30 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
 
 
 def check_grad(f, x, nb_coord=1, shift=1e-6):
-    x = np.array(x, dtype='float')
-    cdef DOUBLE[:] x_ = np.array(x)
-    cdef DOUBLE[:] grad = np.array(x).copy()
-    my_eval(f, x_, grad, nb_coord, mode=GRAD)
-    cdef DOUBLE[:] grad_finite_diffs = np.array(x).copy()
-    cdef DOUBLE[:] x_shift = np.array(x).copy()
+    if sys.version_info[0] > 2:
+        f = f.encode()
+    cdef unsigned char* f_str = <bytes> f
+    cdef DOUBLE[:] x_ = np.array(x, dtype='float')
+    cdef DOUBLE[:] grad = np.array(x_).copy()
+    my_eval(f_str, x_, grad, nb_coord, mode=GRAD)
+    cdef DOUBLE[:] grad_finite_diffs = np.array(x_).copy()
+    cdef DOUBLE[:] x_shift = np.array(x_).copy()
     cdef int i
     cdef DOUBLE error = 0.
     for i in range(nb_coord):
-        x_shift[i] = x[i] + shift
-        grad_finite_diffs[i] = (my_eval(f, x_shift, grad, nb_coord=nb_coord, mode=VAL)
-                                    - my_eval(f, x_, grad, nb_coord=nb_coord, mode=VAL)) / 1e-6
-        x_shift[i] = x[i]
+        x_shift[i] = x_[i] + shift
+        grad_finite_diffs[i] = (my_eval(f_str, x_shift, grad, nb_coord=nb_coord, mode=VAL)
+                                    - my_eval(f_str, x_, grad, nb_coord=nb_coord, mode=VAL)) / shift
+        x_shift[i] = x_[i]
         error += (grad_finite_diffs[i] - grad[i])**2
     return sqrt(error), np.array(grad), np.array(grad_finite_diffs)
+
+
+def my_eval_python(f, x, nb_coord=1, mode=0):
+    if sys.version_info[0] > 2:
+        f = f.encode()
+    cdef unsigned char* f_str = <bytes> f
+    cdef DOUBLE[:] x_ = np.array(x, dtype='float')
+    cdef DOUBLE[:] buff_x = np.array(x_).copy()
+    val = my_eval(f_str, x_, buff_x, nb_coord, mode=mode)
+    return val, np.array(buff_x)

@@ -1,3 +1,4 @@
+
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 
 import numpy as np
@@ -28,7 +29,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [5]  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 10]
+probs = [8, 10, 11, 12, 13]
 
 for prob in probs:
     if prob == 0:
@@ -213,9 +214,12 @@ for prob in probs:
                                         Ah=alpha*threeDgradient
                                         )
 
-        cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=300000, verbose=0.1, max_time=100., print_style='smoothed_gap')
+        pb_toy_tvl1_smartcd = copy.copy(pb_toy_tvl1)
+        
+        cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=1000000, verbose=0.1, max_time=1., print_style='smoothed_gap')
 
-
+        print("TV regularized least squares on toy dataset by SMART-CD")
+        cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=1000000, verbose=0.1, max_time=1., print_style='smoothed_gap', accelerated=True)
 
     if prob == 9:
         try:
@@ -324,7 +328,7 @@ for prob in probs:
         N = XX.shape[1]
 
         blocks = np.arange(0, XX.shape[1]+1, n_class)
-        f = ["logsumexp"] * (XX.shape[0] / n_class) + ["linear"]
+        f = ["logsumexp"] * int(XX.shape[0] / n_class) + ["linear"]
         Af = sp.vstack([XX, XX.T.dot(Y)], format='csc')
         blocks_f = np.arange(0, XX.shape[0]+1, n_class)
         blocks_f = np.concatenate((blocks_f, [blocks_f[-1]+1]))

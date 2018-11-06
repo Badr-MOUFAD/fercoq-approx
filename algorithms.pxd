@@ -4,8 +4,13 @@
 from atoms cimport *
 # bonus: same imports as in atoms
 
+cdef enum:
+    # Max value for our rand_r replacement (near the bottom).
+    # We don't use RAND_MAX because it's different across platforms and
+    # particularly tiny on Windows/MSVC.
+    RAND_R_MAX = 0x7FFFFFFF
 
-cdef void one_step_coordinate_descent(int ii, DOUBLE[:] x,
+cdef void one_step_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] Sy, DOUBLE[:] prox_y,
         DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_ii,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
@@ -22,9 +27,11 @@ cdef void one_step_coordinate_descent(int ii, DOUBLE[:] x,
         unsigned char** f, unsigned char** g, unsigned char** h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
+        int sampling_law, UINT32_t* rand_r_state,
+        UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil
 
-cdef void one_step_accelerated_coordinate_descent(int ii, DOUBLE[:] x,
+cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] y_center, DOUBLE[:] prox_y,
         DOUBLE[:] rhxe, DOUBLE[:] rhxc, DOUBLE[:] rfe, DOUBLE[:] rfc,
         DOUBLE[:] rhy, DOUBLE* theta, DOUBLE theta0, DOUBLE* c_theta,
@@ -42,4 +49,7 @@ cdef void one_step_accelerated_coordinate_descent(int ii, DOUBLE[:] x,
         DOUBLE[:] ch, DOUBLE[:] bh,
         unsigned char** f, unsigned char** g, unsigned char** h,
         int f_present, int g_present, int h_present,
-        DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah, DOUBLE* change_in_x) nogil
+        DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah,
+        int sampling_law, UINT32_t* rand_r_state,
+        UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+        DOUBLE* change_in_x) nogil

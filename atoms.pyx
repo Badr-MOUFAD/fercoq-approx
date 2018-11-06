@@ -1,3 +1,5 @@
+# cython: profile=True
+
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False atoms.pyx
 
@@ -25,49 +27,60 @@ cdef DOUBLE val_conj_not_implemented(unsigned char* func_string,
     return val_conj
 
 
-cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode=VAL,
+cdef DOUBLE prox_conj(unsigned char* func_string, DOUBLE[:] x,
+                        DOUBLE[:] buff, int nb_coord,
+                        DOUBLE prox_param, DOUBLE prox_param2) nogil:
+    # prox_{a f*}(x) = x - a prox{1/a f}(x/a)
+    # prox_{a (ch)*}(y) = y - a prox{1/a (ch)}(y/a)
+    cdef int i
+    for i in range(nb_coord):
+        x[i] /= prox_param  # trick to save a bit of memory
+    my_eval(func_string, x, buff, nb_coord, PROX,
+                prox_param=prox_param2/prox_param)
+    for i in range(nb_coord):
+        x[i] *= prox_param  # we undo the trick
+        buff[i] = x[i] - prox_param * buff[i]
+    return buff[0]
+
+
+cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x,
+                        DOUBLE[:] buff, int nb_coord, MODE mode=VAL,
                         DOUBLE prox_param=1., DOUBLE prox_param2=1.) nogil:
     # Evaluate function func which is given as a chain of characters
     # (I did not manage to send lists of functions directly from python to cython)
-    cdef int i
     if mode==PROX_CONJ:
-        # prox_{a f*}(x) = x - a prox{1/a f}(x/a)
-        # prox_{a (ch)*}(y) = y - a prox{1/a (ch)}(y/a)
-        for i in range(nb_coord):
-            x[i] /= prox_param  # trick to save a bit of memory
-        my_eval(func_string, x, buff, nb_coord, PROX,
-                    prox_param=prox_param2/prox_param)
-        for i in range(nb_coord):
-            x[i] *= prox_param  # we undo the trick
-            buff[i] = x[i] - prox_param * buff[i]
-        return buff[0]
+        return prox_conj(func_string, x, buff, nb_coord, prox_param, prox_param2)
     
-    if func_string[0] == "s":
+    if func_string[0] == 's':
+        # Attention: reserved 1st letter as this function is bypassed in
+        #   algorithms.pyx for efficiency purposes
         return square(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == "a":
+    elif func_string[0] == 'a':
         return abs(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == "n":
+    elif func_string[0] == 'n':
         return norm2(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == "l":
-        if func_string[1] == "i":
+    elif func_string[0] == 'l':
+        if func_string[1] == 'i':
             return linear(x, buff, nb_coord, mode, prox_param)
-        elif func_string[1] == "o":
-            if func_string[3] == "1":
+        elif func_string[1] == 'o':
+            if func_string[3] == '1':
                 return log1pexp(x, buff, nb_coord, mode, prox_param)
-            if func_string[3] == "s":
+            if func_string[3] == 's':
                 return logsumexp(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == "b":
+    elif func_string[0] == 'b':
         return box_zero_one(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == "e":
+    elif func_string[0] == 'e':
         return eq_const(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == "i":
+    elif func_string[0] == 'i':
         return ineq_const(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == "z":
+    elif func_string[0] == 'z':
         return zero(x, buff, nb_coord, mode, prox_param)
+    else:
+        return -INF
     # TODO: quadratic...
 
 
-cdef DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x -> x**2
     cdef int i
     cdef DOUBLE val = 0.
@@ -107,10 +120,10 @@ cdef inline DOUBLE min(DOUBLE x, DOUBLE y) nogil:
         return x
     return y
 
-cdef DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x -> |x|
     cdef int i
-    cdef DOUBLE val = 0.
+    cdef DOUBLE val
     if mode == GRAD:
         for i in range(nb_coord):
             buff[i] = sign(x[i])
@@ -128,14 +141,18 @@ cdef DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pro
                 return 0
         return 1
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("abs", x, buff, nb_coord)
+        for i in range(nb_coord):
+            if fabs(x[i]) > 1.00000001:
+                return INF
+        return 0 # val_conj_not_implemented("abs", x, buff, nb_coord)
     else:  # mode == VAL
+        val = 0.
         for i in range(nb_coord):
             val += fabs(x[i])
         return val
 
 
-cdef DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x -> ||x||_2
     # the dimension of the space on which we compute the norm is given by nb_coord
     cdef int i
@@ -176,7 +193,7 @@ cdef DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE p
         return val
 
 
-cdef DOUBLE linear(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE linear(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x -> x
     cdef int i
     cdef DOUBLE val = 0.
@@ -201,7 +218,7 @@ cdef DOUBLE linear(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE 
         return val
 
 
-cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function log(1+exp(x))
     cdef int i
     cdef DOUBLE val = 0.
@@ -235,7 +252,7 @@ cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
         return val
 
 
-cdef DOUBLE logsumexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE logsumexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function log(exp(x_0)+...+exp(x_n))
     cdef int i
     cdef DOUBLE max_x = x[0]
@@ -268,7 +285,7 @@ cdef DOUBLE logsumexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUB
         return max_x + log(sum_exp_x)
 
     
-cdef DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x in [0,1]
     cdef int i
     cdef DOUBLE val = 0.
@@ -299,7 +316,7 @@ cdef DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, D
         return val
 
 
-cdef DOUBLE eq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE eq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x == 0
     cdef int i
     cdef DOUBLE val = 0.
@@ -328,7 +345,7 @@ cdef DOUBLE eq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
         return val
 
 
-cdef DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x >= 0
     cdef int i
     cdef DOUBLE val = 0.
@@ -357,7 +374,7 @@ cdef DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOU
         return val
 
     
-cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
+cdef inline DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param=1.) nogil:
     # Function x -> 0
     cdef int i
     if mode == GRAD:

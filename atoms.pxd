@@ -24,8 +24,9 @@ cdef enum MODE:
 
 cdef int STRING_LONG_ENOUGH = 6
 
-cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode=*,
-                       DOUBLE prox_param=*, DOUBLE prox_param2=*) nogil
+cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x,
+                        DOUBLE[:] buff, int nb_coord, MODE mode=*,
+                        DOUBLE prox_param=*, DOUBLE prox_param2=*) nogil
 
 # func_string can be:
 #    "square", "abs", "norm2", "linear", "log1pexp", "box_zero_one", 

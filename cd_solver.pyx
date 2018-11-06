@@ -1,3 +1,5 @@
+# cython: profile=True
+
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
 
@@ -12,33 +14,16 @@ from scipy import linalg
 from scipy import sparse
 import warnings
 import time
+import sys
 
 from helpers cimport compute_primal_value, compute_smoothed_gap
 from algorithms cimport one_step_coordinate_descent
 from algorithms cimport one_step_accelerated_coordinate_descent
+from algorithms cimport RAND_R_MAX
+
 from algorithms import find_dual_variables_to_update, variable_restart
 
 # The following three functions are copied from Scikit Learn.
-
-cdef enum:
-    # Max value for our rand_r replacement (near the bottom).
-    # We don't use RAND_MAX because it's different across platforms and
-    # particularly tiny on Windows/MSVC.
-    RAND_R_MAX = 0x7FFFFFFF
-
-
-cdef inline UINT32_t our_rand_r(UINT32_t* seed) nogil:
-    seed[0] ^= <UINT32_t>(seed[0] << 13)
-    seed[0] ^= <UINT32_t>(seed[0] >> 17)
-    seed[0] ^= <UINT32_t>(seed[0] << 5)
-
-    return seed[0] % (<UINT32_t>RAND_R_MAX + 1)
-
-
-cdef inline UINT32_t rand_int(UINT32_t end, UINT32_t* random_state) nogil:
-    """Generate a random integer in [0; end)."""
-    return our_rand_r(random_state) % end
-
 
 
 class Problem:
@@ -175,8 +160,8 @@ class Problem:
 def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                            verbose=0, print_style='classical',
                            min_change_in_x=1e-15, step_size_factor=1.,
-                           sampling='uniform', accelerated=False,
-                           restart_period=0, callback=None):
+                           sampling='uniform', int accelerated=False,
+                           restart_period=0, callback=None, int per_pass=1):
     # pb is a Problem as defined above
     # max_iter: maximum number of passes over the data
     # max_time: in seconds
@@ -228,6 +213,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     if f_present is True:
         f = <unsigned char**>malloc(len(pb.f)*sizeof(char*))
         for j in range(len(pb.f)):
+            if sys.version_info[0] > 2 and isinstance(pb.f[j], bytes) == False:
+                pb.f[j] = pb.f[j].encode()
             f[j] = <bytes>pb.f[j]
     else:
         f = <unsigned char**>malloc(0)  # just to remove uninitialized warning
@@ -237,6 +224,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     if g_present is True:
         g = <unsigned char**>malloc(len(pb.g)*sizeof(char*))
         for ii in range(len(pb.g)):
+            if sys.version_info[0] > 2 and isinstance(pb.g[ii], bytes) == False:
+                pb.g[ii] = pb.g[ii].encode()
             g[ii] = <bytes>pb.g[ii]
     else:
         g = <unsigned char**>malloc(0)  # just to remove uninitialized warning
@@ -246,6 +235,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     if h_present is True:
         h = <unsigned char**>malloc(len(pb.h)*sizeof(char*))
         for jh in range(len(pb.h)):
+            if sys.version_info[0] > 2 and isinstance(pb.h[jh], bytes) == False:
+                pb.h[jh] = pb.h[jh].encode()
             h[jh] = <bytes>pb.h[jh]
     else:
         h = <unsigned char**>malloc(0)  # just to remove uninitialized warning
@@ -315,9 +306,9 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     else:
         rhx = np.empty(0)
     cdef DOUBLE[:] rhy = np.zeros(pb.Ah.shape[1])
-    cdef DOUBLE[:] Sy
+    cdef DOUBLE[:] Sy = np.zeros(pb.Ah.shape[0])
     if h_present is True and accelerated is False:
-        Sy = np.zeros(pb.Ah.shape[0])  # Sy is the mean of the duplicates of y
+        # Sy is the mean of the duplicates of y
         for i in range(N):
             for l in range(Ah_indptr[i], Ah_indptr[i+1]):
                 Sy[Ah_indices[l]] += y[l] / Ah_nnz_perrow[Ah_indices[l]]
@@ -341,7 +332,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     cdef DOUBLE theta0 = 1. / n
     cdef DOUBLE theta = theta0
     cdef DOUBLE c_theta = 1.
-    cdef DOUBLE beta0 = 0
+    cdef DOUBLE beta0 = 1e-30
     cdef DOUBLE beta
     restart_history = []
     next_period = restart_period
@@ -352,13 +343,14 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     # buffers and auxiliary variables
     max_nb_coord = <int> np.max(np.diff(pb.blocks))
     max_nb_coord_h = <int> np.max(np.hstack((np.zeros(1), np.diff(pb.blocks_h))))
+    max_nb_coord_f = <int> np.max(np.hstack((np.zeros(1), np.diff(pb.blocks_f))))
     cdef DOUBLE[:] grad = np.zeros(max_nb_coord)
     cdef DOUBLE[:] x_ii = np.zeros(max_nb_coord)
     cdef DOUBLE[:] prox_y = np.zeros(pb.Ah.shape[0])
     cdef DOUBLE[:] rhy_ii = np.zeros(max_nb_coord)
     cdef DOUBLE[:] buff_x = np.zeros(max_nb_coord)
     cdef DOUBLE[:] buff_y = np.zeros(max_nb_coord_h)
-    cdef DOUBLE[:] buff = np.zeros(max(max_nb_coord, max_nb_coord_h))
+    cdef DOUBLE[:] buff = np.zeros(max([max_nb_coord, max_nb_coord_h, max_nb_coord_f]))
     cdef DOUBLE[:] xc_ii
     cdef DOUBLE[:] xe_ii
     if accelerated == True:
@@ -399,18 +391,16 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
             1. / np.sqrt(np.array(norm2_columns_Ah) + 1e-30),
             np.array(Lf) / (np.array(norm2_columns_Ah) + 1e-30)) \
                             * step_size_factor
-        if accelerated is True:
-            beta0 = 1. / np.max(np.array(dual_step_size))
+        if accelerated == True:
+            beta0 = 1. / np.maximum(1e-30, np.max(np.array(dual_step_size)))
         else:
             primal_step_size = 0.9 / (Lf + np.array(dual_step_size)
                                           * np.array(norm2_columns_Ah))
-
     beta = beta0
 
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
     if sampling == 'kink_half':
         sampling_law = 1
-    cdef int focus_on_kink_or_not = 0
     cdef int n_active = n
     cdef UINT32_t[:] active_set
     if sampling_law == 1:
@@ -419,6 +409,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         if accelerated == True:
             theta0 = 0.5 / n
             theta = theta0
+    else:
+        active_set = np.empty(0, dtype=np.uint32)
 
     cdef DOUBLE primal_val = 0.
     cdef DOUBLE infeas = 0.
@@ -462,24 +454,15 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                         mode=IS_KINK) == 0:
                     active_set[n_active] = ii
                     n_active += 1
-            
+
         change_in_x = 0.
         change_in_y = 0.
-        
-        for f_iter in range(n):
-            if sampling_law == 0:
-                ii = rand_int(n, rand_r_state)
-            elif sampling_law == 1:
-                # probability 1/2 to focus on non-kink points
-                focus_on_kink_or_not = rand_int(2, rand_r_state)
-                if focus_on_kink_or_not == 0 or n_active == 0:
-                    ii = rand_int(n, rand_r_state)
-                else:
-                    ii = rand_int(n_active, rand_r_state)
-                    ii = active_set[ii]
+
+        if 1:
+        # with nogil:
 
             if accelerated == False:
-                one_step_coordinate_descent(ii, x,
+                one_step_coordinate_descent(x,
                     y, Sy, prox_y, rhx, rf, rhy, rhy_ii,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
@@ -492,9 +475,10 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     ch, bh,
                     f, g, h, f_present, g_present, h_present,
                     primal_step_size, dual_step_size,
+                    sampling_law, rand_r_state, active_set, n_active, n,
                     &change_in_x, &change_in_y)
             else:
-                one_step_accelerated_coordinate_descent(ii, x,
+                one_step_accelerated_coordinate_descent(x,
                     xe, xc, y_center, prox_y, rhxe, rhxc, rfe, rfc,
                     rhy, &theta, theta0, &c_theta, &beta,
                     buff_x, buff_y, buff, xe_ii, xc_ii, grad,
@@ -504,7 +488,9 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     inv_blocks_f, inv_blocks_h, Ah_nnz_perrow,
                     Ah_col_indices, dual_vars_to_update, ch, bh,
                     f, g, h, f_present, g_present, h_present,
-                    Lf, norm2_columns_Ah, &change_in_x)
+                    Lf, norm2_columns_Ah, 
+                    sampling_law, rand_r_state, active_set, n_active, n,
+                    &change_in_x)
 
         if accelerated is True and restart_period > 0:
             do_restart, next_period = variable_restart(restart_history,
@@ -551,8 +537,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                         print("%.5f \t %d \t %+.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, change_in_x))
                 elif print_style == 'smoothed_gap':
-                    beta_print = infeas
                     if h_present is True:
+                        beta_print = max(infeas, 1e-20)
                         for j in range(len(pb.h)):
                             if accelerated == False:
                                 # Compute one more prox_h* in case Sy is not feasible
@@ -572,6 +558,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                                 prox_param2=ch[j])
                             for l in range(blocks_h[j+1]-blocks_h[j]):
                                 prox_y[blocks_h[j]+l] = buff[l]
+                    else:
+                        beta_print = 0
 
                     smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
                                         rf, rhx, prox_y,
