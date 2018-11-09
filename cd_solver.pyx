@@ -22,7 +22,6 @@ from algorithms cimport one_step_accelerated_coordinate_descent
 from algorithms cimport RAND_R_MAX
 
 from algorithms import find_dual_variables_to_update, variable_restart
-from atoms import string_to_enum
 
 # The following three functions are copied from Scikit Learn.
 
@@ -210,37 +209,37 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] bh = pb.bh
 
     cdef int f_present = pb.f_present
-    cdef FUNCTION* f
+    cdef atom* f
     if f_present is True:
-        f = <FUNCTION*>malloc(len(pb.f)*sizeof(FUNCTION))
+        f = <atom*>malloc(len(pb.f)*sizeof(atom))
         for j in range(len(pb.f)):
             if sys.version_info[0] > 2 and isinstance(pb.f[j], bytes) == True:
                 pb.f[j] = pb.f[j].encode()
-            f[j] = string_to_enum(<bytes>pb.f[j])
+            f[j] = string_to_func(<bytes>pb.f[j])
     else:
-        f = <FUNCTION*>malloc(0)  # just to remove uninitialized warning
+        f = <atom*>malloc(0)  # just to remove uninitialized warning
 
     cdef int g_present = pb.g_present
-    cdef FUNCTION* g
+    cdef atom* g
     if g_present is True:
-        g = <FUNCTION*>malloc(len(pb.g)*sizeof(FUNCTION))
+        g = <atom*>malloc(len(pb.g)*sizeof(atom))
         for ii in range(len(pb.g)):
             if sys.version_info[0] > 2 and isinstance(pb.g[ii], bytes) == True:
                 pb.g[ii] = pb.g[ii].encode()
-            g[ii] = string_to_enum(<bytes>pb.g[ii])
+            g[ii] = string_to_func(<bytes>pb.g[ii])
     else:
-        g = <FUNCTION*>malloc(0)  # just to remove uninitialized warning
+        g = <atom*>malloc(0)  # just to remove uninitialized warning
 
     cdef int h_present = pb.h_present
-    cdef FUNCTION* h
+    cdef atom* h
     if h_present is True:
-        h = <FUNCTION*>malloc(len(pb.h)*sizeof(FUNCTION))
+        h = <atom*>malloc(len(pb.h)*sizeof(atom))
         for jh in range(len(pb.h)):
             if sys.version_info[0] > 2 and isinstance(pb.h[jh], bytes) == True:
                 pb.h[jh] = pb.h[jh].encode()
-            h[jh] = string_to_enum(<bytes>pb.h[jh])
+            h[jh] = string_to_func(<bytes>pb.h[jh])
     else:
-        h = <FUNCTION*>malloc(0)  # just to remove uninitialized warning
+        h = <atom*>malloc(0)  # just to remove uninitialized warning
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
 
     # We have two kind of dual vectors so the user may use any of them to initialize
@@ -361,8 +360,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     # Compute Lipschitz constants
     cdef DOUBLE[:] tmp_Lf = np.zeros(len(pb.f))
     for j in range(len(pb.f)):
-        tmp_Lf[j] = my_eval(f[j], buff_x, buff, nb_coord=blocks_f[j+1]-blocks_f[j],
-                                mode=LIPSCHITZ)
+        tmp_Lf[j] = f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
+                         LIPSCHITZ, useless_param, useless_param)
     cdef DOUBLE[:] Lf = 1e-30 * np.ones(n)
     if f_present is True:
         for ii in range(n):
@@ -451,8 +450,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                 for i in range(nb_coord):
                     coord = blocks[ii] + i
                     buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
-                if my_eval(g[ii], buff_x, buff, nb_coord=nb_coord,
-                        mode=IS_KINK) == 0:
+                if g[ii](buff_x, buff, nb_coord, IS_KINK,
+                         useless_param, useless_param) == 0:
                     active_set[n_active] = ii
                     n_active += 1
 
@@ -552,11 +551,11 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                                     buff_y[l] = y_center[blocks_h[j]+l] \
                                       + rhx[blocks_h[j]+l] / beta
 
-                            my_eval(h[j], buff_y, buff,
-                                nb_coord=blocks_h[j+1]-blocks_h[j],
-                                mode=PROX_CONJ,
-                                prox_param=dual_step_size[j],
-                                prox_param2=ch[j])
+                            h[j](buff_y, buff,
+                                 blocks_h[j+1]-blocks_h[j],
+                                 PROX_CONJ,
+                                 dual_step_size[j],
+                                 ch[j])
                             for l in range(blocks_h[j+1]-blocks_h[j]):
                                 prox_y[blocks_h[j]+l] = buff[l]
                     else:

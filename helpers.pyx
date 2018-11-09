@@ -5,10 +5,9 @@
 
 import numpy as np
 import sys
-from atoms import string_to_enum
 
 
-cdef void compute_primal_value(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
+cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* val, DOUBLE* infeas):
@@ -17,41 +16,42 @@ cdef void compute_primal_value(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
     infeas[0] = 0.
     if pb.f_present is True:
         for j in range(len(pb.f)):
-            val[0] += pb.cf[j] * my_eval(f[j],
-                                      rf[pb.blocks_f[j]:pb.blocks_f[j+1]],
+            val[0] += pb.cf[j] * f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]],
                                       buff,
-                                      nb_coord=pb.blocks_f[j+1]-pb.blocks_f[j])
+                                      pb.blocks_f[j+1]-pb.blocks_f[j],
+                                      VAL, useless_param, useless_param)
     if pb.g_present is True:
         for ii in range(len(pb.g)):
             nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
                 buff_x[i] = pb.Dg.data[0][ii] * x[coord] - pb.bg[coord]
-            val[0] += pb.cg[ii] * my_eval(g[ii], buff_x, buff,
-                                           nb_coord=nb_coord)
+            val[0] += pb.cg[ii] * g[ii](buff_x, buff,
+                                        nb_coord, VAL, useless_param,
+                                        useless_param)
     if pb.h_present is True:
         if pb.h_takes_infinite_values == False:
             for jh in range(len(pb.h)):
-                val[0] += pb.ch[jh] * my_eval(h[jh],
+                val[0] += pb.ch[jh] * h[jh](
                                         rhx[pb.blocks_h[jh]:pb.blocks_h[jh+1]],
                                         buff,
-                                        nb_coord=pb.blocks_h[jh+1] - pb.blocks_h[jh])
+                                        pb.blocks_h[jh+1]-pb.blocks_h[jh],
+                                        VAL, useless_param, useless_param)
         if pb.h_takes_infinite_values == True:
             for jh in range(len(pb.h)):
                 for l in range(pb.blocks_h[jh+1]-pb.blocks_h[jh]):
                     coord = pb.blocks_h[jh]+l
                     buff_y[l] = rhx[coord]
                 # project rhx onto the domain of h
-                my_eval(h[jh], buff_y, buff,
-                            nb_coord=pb.blocks_h[jh+1]-pb.blocks_h[jh],
-                            mode=PROX, prox_param=1e-20)
+                h[jh](buff_y, buff,
+                            pb.blocks_h[jh+1]-pb.blocks_h[jh],
+                            PROX, 1e-20, useless_param)
                 for l in range(pb.blocks_h[jh+1]-pb.blocks_h[jh]):
                     coord = pb.blocks_h[jh]+l
                     infeas[0] += fabs(buff[l] - rhx[coord])
 
 
-
-cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
+cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx, DOUBLE[:] Sy,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* beta, DOUBLE* gamma):
@@ -60,13 +60,13 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
     z = np.zeros(pb.Af.shape[0])  # dual variable associated to f(Af x - bf)
     if pb.f_present is True:
         for j in range(len(pb.f)):
-            my_eval(f[j], rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
-                    nb_coord=pb.blocks_f[j+1]-pb.blocks_f[j], mode=GRAD)
+            f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
+                 pb.blocks_f[j+1]-pb.blocks_f[j], GRAD,
+                 useless_param, useless_param)
             for l in range(pb.blocks_f[j+1]-pb.blocks_f[j]):
                 coord = pb.blocks_f[j] + l
                 z[coord] = pb.cf[j] * buff[l]
         val += z.dot(np.array(rf)) + pb.bf.dot(z)   # = f(Af x - bf) + f*(z) + bf.dot(z)
-        # print('contrib f:', val)
         AfTz = pb.Af.T.dot(z)
     else:
         AfTz = np.zeros(pb.N)
@@ -86,9 +86,8 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
                 buff_x[i] = pb.Dg.data[0][ii] * x[coord] - pb.bg[coord]
-            val_g += pb.cg[ii] * my_eval(g[ii], buff_x, buff,
-                                           nb_coord=nb_coord)
-        # print('g(x) = ', val_g)
+            val_g += pb.cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
+                                       useless_param, useless_param)
 
         # estimate dual infeasibility
         dual_infeas = 0.
@@ -100,9 +99,8 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
                     - (AfTz[coord] + AhTSy[coord])
                     + pb.bg[coord])
                 # project -AfTz - AhTSy onto the domain of g*
-            my_eval(g[ii], buff_x, buff,
-                            nb_coord=nb_coord,
-                            mode=PROX_CONJ, prox_param=1./INF, prox_param2=pb.cg[ii])
+            g[ii](buff_x, buff, nb_coord,
+                  PROX_CONJ, 1./INF, pb.cg[ii])
             for i in range(nb_coord):
                 dual_infeas += fabs(buff[i] - buff_x[i])
 
@@ -119,9 +117,8 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
                 coord = pb.blocks[ii] + i
                 buff_x[i] = pb.Dg.data[0][ii] * (
                     x[coord] - 1. / gamma[0] * (AfTz[coord] + AhTSy[coord])) - pb.bg[coord]
-            my_eval(g[ii], buff_x, buff,
-                        nb_coord=nb_coord,
-                        mode=PROX, prox_param=pb.cg[ii]*pb.Dg.data[0][ii]**2/gamma[0])
+            g[ii](buff_x, buff, nb_coord, PROX,
+                  pb.cg[ii]*pb.Dg.data[0][ii]**2/gamma[0], useless_param)
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
                 xbar[coord] = 1. / pb.Dg.data[0][ii] * (buff[i] + pb.bg[coord])
@@ -130,13 +127,12 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
                 buff_x[i] = pb.Dg.data[0][ii] * xbar[coord] - pb.bg[coord]
-            val_g1 -= pb.cg[ii] * my_eval(g[ii], buff_x, buff, nb_coord=nb_coord)
-            # print('g_ii(xbar_ii) = ', pb.cg[ii] * my_eval(g[ii], buff_x, buff, nb_coord=nb_coord))
+            val_g1 -= pb.cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
+                                        useless_param, useless_param)
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
                 val_g2 -= (AfTz[coord] + AhTSy[coord]) * xbar[coord]
                 val_g3 -= gamma[0] / 2. * (xbar[coord] - x[coord])**2
-        # print('contrib g:', val_g, val_g1, val_g2, val_g3, np.array(xbar), np.array(x), np.array(AfTz))
         val += val_g + val_g1 + val_g2 + val_g3
 
     if pb.h_present is True:
@@ -150,8 +146,8 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
             for l in range(nb_coord):
                 coord = pb.blocks_h[jh] + l
                 buff_y[l] = Sy[coord] / pb.ch[jh]
-            val_h += pb.ch[jh] * my_eval(h[jh], buff_y, buff, nb_coord=nb_coord,
-                            mode=VAL_CONJ)
+            val_h += pb.ch[jh] * h[jh](buff_y, buff, nb_coord,
+                                       VAL_CONJ, useless_param, useless_param)
             for l in range(nb_coord):
                 coord = pb.blocks_h[jh] + l
                 val_hh += pb.bh[coord] * Sy[coord]
@@ -159,10 +155,11 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
         if pb.h_takes_infinite_values == False:
             # compute h(Ah x - bh)
             for jh in range(len(pb.h)):
-                val_h2 += pb.ch[jh] * my_eval(h[jh],
+                val_h2 += pb.ch[jh] * h[jh](
                                         rhx[pb.blocks_h[jh]:pb.blocks_h[jh+1]],
                                         buff,
-                                        nb_coord=pb.blocks_h[jh+1] - pb.blocks_h[jh])
+                                        pb.blocks_h[jh+1] - pb.blocks_h[jh],
+                                        VAL, useless_param, useless_param)
         if pb.h_takes_infinite_values == True:
             # compute h_beta(Ah x - bh; Sy) = (Ah x - bh) ybar - h*(ybar) - beta/2 ||Sy - ybar||**2
             beta[0] = max(1./INF, beta[0])
@@ -172,21 +169,20 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
                 for l in range(nb_coord):
                     coord = pb.blocks_h[jh] + l
                     buff_y[l] = Sy[coord] + 1. / beta[0] * rhx[coord]
-                my_eval(h[jh], buff_y, buff,
-                            nb_coord=nb_coord,
-                            mode=PROX_CONJ, prox_param=1./beta[0], prox_param2=pb.ch[jh])
+                h[jh](buff_y, buff, nb_coord, PROX_CONJ,
+                      1./beta[0], pb.ch[jh])
 
                 # compute -h*(ybar) = -ybar.ybarbar + h(ybarbar)
                 for l in range(nb_coord):
                     coord = pb.blocks_h[jh] + l
                     ybar[coord] = buff[l]
                     buff_y[l] = Sy[coord] + INF * ybar[coord]
-                my_eval(h[jh], buff_y, buff, nb_coord=nb_coord,
-                            mode=PROX, prox_param=pb.ch[jh]*INF)
+                h[jh](buff_y, buff, nb_coord, PROX,
+                      pb.ch[jh]*INF, useless_param)
                 for l in range(nb_coord):
                     buff_y[l] = buff[l]
-                h_ybarbar = my_eval(h[jh], buff_y, buff, nb_coord=nb_coord,
-                            mode=VAL)
+                h_ybarbar = h[jh](buff_y, buff, nb_coord, VAL,
+                                  useless_param, useless_param)
                 val_h2 += h_ybarbar
                 for l in range(nb_coord):
                     coord = pb.blocks_h[jh] + l
@@ -200,28 +196,28 @@ cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
 def check_grad(f, x, nb_coord=1, shift=1e-6):
     if sys.version_info[0] > 2 and isinstance(f, bytes) == True:
         f = f.encode()
-    cdef FUNCTION func = string_to_enum(<bytes> f)
+    cdef atom func = string_to_func(<bytes> f)
     cdef DOUBLE[:] x_ = np.array(x, dtype='float')
     cdef DOUBLE[:] grad = np.array(x_).copy()
-    my_eval(func, x_, grad, nb_coord, mode=GRAD)
+    func(x_, grad, nb_coord, GRAD, useless_param, useless_param)
     cdef DOUBLE[:] grad_finite_diffs = np.array(x_).copy()
     cdef DOUBLE[:] x_shift = np.array(x_).copy()
     cdef int i
     cdef DOUBLE error = 0.
     for i in range(nb_coord):
         x_shift[i] = x_[i] + shift
-        grad_finite_diffs[i] = (my_eval(func, x_shift, grad, nb_coord=nb_coord, mode=VAL)
-                                    - my_eval(func, x_, grad, nb_coord=nb_coord, mode=VAL)) / shift
+        grad_finite_diffs[i] = (func(x_shift, grad, nb_coord, VAL, useless_param, useless_param)
+                                    - func(x_, grad, nb_coord, VAL, useless_param, useless_param)) / shift
         x_shift[i] = x_[i]
         error += (grad_finite_diffs[i] - grad[i])**2
     return sqrt(error), np.array(grad), np.array(grad_finite_diffs)
 
 
-def my_eval_python(f, x, nb_coord=1, mode=0):
+def my_eval_python(f, x, nb_coord=1, mode=0, param=1., param2=1.):
     if sys.version_info[0] > 2 and isinstance(f, bytes) == True:
         f = f.encode()
-    cdef FUNCTION func = string_to_enum(<bytes> f)
+    cdef atom func = string_to_func(<bytes> f)
     cdef DOUBLE[:] x_ = np.array(x, dtype='float')
     cdef DOUBLE[:] buff_x = np.array(x_).copy()
-    val = my_eval(func, x_, buff_x, nb_coord, mode=mode)
+    val = func(x_, buff_x, nb_coord, mode, param, param2)
     return val, np.array(buff_x)

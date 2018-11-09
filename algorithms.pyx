@@ -55,7 +55,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
-        FUNCTION* f, FUNCTION* g, FUNCTION* h,
+        atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         int sampling_law, UINT32_t* rand_r_state,
@@ -100,11 +100,11 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
                     for l in range(blocks_h[j+1]-blocks_h[j]):
                         buff_y[l] = Sy[blocks_h[j]+l] \
                                       + rhx[blocks_h[j]+l] * dual_step_size[j]
-                    my_eval(h[j], buff_y, buff,
-                                nb_coord=blocks_h[j+1]-blocks_h[j],
-                                mode=PROX_CONJ,
-                                prox_param=dual_step_size[j],
-                                prox_param2=ch[j])
+                    h[j](buff_y, buff,
+                                blocks_h[j+1]-blocks_h[j],
+                                PROX_CONJ,
+                                dual_step_size[j],
+                                ch[j])
                     for l in range(blocks_h[j+1]-blocks_h[j]):
                         prox_y[blocks_h[j]+l] = buff[l]
                 # else: we have already computed prox_y[blocks_h[j]:blocks_h[j+1]], so nothing to do. Moreover, we can update Sy[jh] safely.
@@ -130,13 +130,14 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
                     jj = Af_indices[l]
                     j_prev = j
                     j = inv_blocks_f[jj]
-                    if f[j] == SQUARE:
+                    if f[j] == square:
                         # hard code for the important special case of square loss
                         grad[i] += 2 * cf[j] * Af_data[l] * rf[jj]
                     else:
                         if l == Af_indptr[coord] or j != j_prev:
-                            my_eval(f[j], rf[blocks_f[j]:blocks_f[j+1]], buff,
-                                    nb_coord=blocks_f[j+1]-blocks_f[j], mode=GRAD)
+                            f[j](rf[blocks_f[j]:blocks_f[j+1]], buff,
+                                 blocks_f[j+1]-blocks_f[j], GRAD,
+                                 useless_param, useless_param)
                         # else: we have already computed it
                         #   good for dense Af but not optimal for diagonal Af
                         grad[i] += cf[j] * Af_data[l] * buff[jj - blocks_f[j]]
@@ -149,8 +150,8 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
-            my_eval(g[ii], buff_x, buff, nb_coord=nb_coord, mode=PROX,
-                prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size[ii])
+            g[ii](buff_x, buff, nb_coord, PROX,
+                  cg[ii]*Dg_data[ii]**2*primal_step_size[ii], useless_param)
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 x[coord] = (buff[i] + bg[coord]) / Dg_data[ii]
@@ -228,7 +229,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
-        FUNCTION* f, FUNCTION* g, FUNCTION* h,
+        atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah, 
         int sampling_law, UINT32_t* rand_r_state,
@@ -284,11 +285,11 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                     for l in range(blocks_h[j+1]-blocks_h[j]):
                         jj = blocks_h[j]+l
                         buff_y[l] = y_center[jj] + (rhxe[jj] + c_theta[0] * rhxc[jj]) / beta[0]
-                    my_eval(h[j], buff_y, buff,
-                                nb_coord=blocks_h[j+1]-blocks_h[j],
-                                mode=PROX_CONJ,
-                                prox_param=1./beta[0],
-                                prox_param2=ch[j])
+                    h[j](buff_y, buff,
+                                blocks_h[j+1]-blocks_h[j],
+                                PROX_CONJ,
+                                1./beta[0],
+                                ch[j])
                     for l in range(blocks_h[j+1]-blocks_h[j]):
                         jj = blocks_h[j]+l
                         prox_y[jj] = buff[l]
@@ -309,7 +310,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                     jj = Af_indices[l]
                     j_prev = j
                     j = inv_blocks_f[jj]
-                    if f[j] == SQUARE:
+                    if f[j] == square:
                         # hard code for the important special case of square loss
                         grad[i] += 2 * cf[j] * Af_data[l] * (rfe[jj] + \
                                   c_theta[0] * rfc[jj])
@@ -318,8 +319,9 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                             for jh in range(blocks_f[j+1] - blocks_f[j]):
                                 buff_x[jh] = rfe[blocks_f[j] + jh] + \
                                   c_theta[0] * rfc[blocks_f[j] + jh]
-                            my_eval(f[j], buff_x, buff,
-                                    nb_coord=blocks_f[j+1]-blocks_f[j], mode=GRAD)
+                            f[j](buff_x, buff,
+                                 blocks_f[j+1]-blocks_f[j], GRAD,
+                                 useless_param, useless_param)
                         # else: we have already computed it
                         #   good for dense Af but not optimal for diagonal Af
                         grad[i] += cf[j] * Af_data[l] * buff[jj - blocks_f[j]]
@@ -332,8 +334,9 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 buff_x[i] = Dg_data[ii] * xe[coord] - bg[coord]
-            my_eval(g[ii], buff_x, buff, nb_coord=nb_coord, mode=PROX,
-                prox_param=cg[ii]*Dg_data[ii]**2*primal_step_size*theta0/theta[0])
+            g[ii](buff_x, buff, nb_coord, PROX,
+                  cg[ii]*Dg_data[ii]**2*primal_step_size*theta0/theta[0],
+                  useless_param)
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 xe[coord] = (buff[i] + bg[coord])/ Dg_data[ii]

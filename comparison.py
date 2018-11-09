@@ -39,7 +39,7 @@ def cd_pure_python(f, Af, bf, g, max_iter=100):
     return x
 
 
-if 0:
+if 1:
     print("Lasso on Leukemia")
     dataset = 'leukemia'
     data = fetch_mldata(dataset)
