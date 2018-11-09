@@ -55,7 +55,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
-        unsigned char** f, unsigned char** g, unsigned char** h,
+        FUNCTION* f, FUNCTION* g, FUNCTION* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         int sampling_law, UINT32_t* rand_r_state,
@@ -130,7 +130,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
                     jj = Af_indices[l]
                     j_prev = j
                     j = inv_blocks_f[jj]
-                    if f[j][0] == 's':
+                    if f[j] == SQUARE:
                         # hard code for the important special case of square loss
                         grad[i] += 2 * cf[j] * Af_data[l] * rf[jj]
                     else:
@@ -228,7 +228,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
-        unsigned char** f, unsigned char** g, unsigned char** h,
+        FUNCTION* f, FUNCTION* g, FUNCTION* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah, 
         int sampling_law, UINT32_t* rand_r_state,
@@ -309,7 +309,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                     jj = Af_indices[l]
                     j_prev = j
                     j = inv_blocks_f[jj]
-                    if f[j][0] == 's':
+                    if f[j] == SQUARE:
                         # hard code for the important special case of square loss
                         grad[i] += 2 * cf[j] * Af_data[l] * (rfe[jj] + \
                                   c_theta[0] * rfc[jj])

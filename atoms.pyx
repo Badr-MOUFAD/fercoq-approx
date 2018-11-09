@@ -8,7 +8,34 @@
 cdef DOUBLE INF = 1e30
 
 
-cdef DOUBLE val_conj_not_implemented(unsigned char* func_string,
+def string_to_enum(func_string):
+    if func_string[0] == 's':
+        return SQUARE
+    elif func_string[0] == 'a':
+        return ABS
+    elif func_string[0] == 'n':
+        return NORM2
+    elif func_string[0] == 'l':
+        if func_string[1] == 'i':
+            return LINEAR
+        elif func_string[1] == 'o':
+            if func_string[3] == '1':
+                return LOG1PEXP
+            if func_string[3] == 's':
+                return LOGSUMEXP
+    elif func_string[0] == 'b':
+        return BOX_ZERO_ONE
+    elif func_string[0] == 'e':
+        return EQ_CONST
+    elif func_string[0] == 'i':
+        return INEQ_CONST
+    elif func_string[0] == 'z':
+        return ZERO
+    else:
+        return -1  # error
+
+
+cdef DOUBLE val_conj_not_implemented(FUNCTION func,
                 DOUBLE[:] x, DOUBLE[:] buff, int nb_coord) nogil:
     # Approximate f*(x) by sup <x, z> - f(z) - alpha/2. ||z||**2
     # with alpha very small (prone to numerical errors)
@@ -16,18 +43,18 @@ cdef DOUBLE val_conj_not_implemented(unsigned char* func_string,
     cdef DOUBLE val_conj = 0.
     for i in range(nb_coord):
         x[i] = INF * x[i]
-    my_eval(func_string, x, buff, nb_coord, PROX, INF)
+    my_eval(func, x, buff, nb_coord, PROX, INF)
     for i in range(nb_coord):
         x[i] = x[i] / INF
 
     for i in range(nb_coord):
         val_conj += x[i] * buff[i]
         val_conj -= 0.5 / INF * buff[i]**2
-    val_conj -= my_eval(func_string, buff, buff, nb_coord, VAL)
+    val_conj -= my_eval(func, buff, buff, nb_coord, VAL)
     return val_conj
 
 
-cdef DOUBLE prox_conj(unsigned char* func_string, DOUBLE[:] x,
+cdef DOUBLE prox_conj(FUNCTION func, DOUBLE[:] x,
                         DOUBLE[:] buff, int nb_coord,
                         DOUBLE prox_param, DOUBLE prox_param2) nogil:
     # prox_{a f*}(x) = x - a prox{1/a f}(x/a)
@@ -35,7 +62,7 @@ cdef DOUBLE prox_conj(unsigned char* func_string, DOUBLE[:] x,
     cdef int i
     for i in range(nb_coord):
         x[i] /= prox_param  # trick to save a bit of memory
-    my_eval(func_string, x, buff, nb_coord, PROX,
+    my_eval(func, x, buff, nb_coord, PROX,
                 prox_param=prox_param2/prox_param)
     for i in range(nb_coord):
         x[i] *= prox_param  # we undo the trick
@@ -43,37 +70,33 @@ cdef DOUBLE prox_conj(unsigned char* func_string, DOUBLE[:] x,
     return buff[0]
 
 
-cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x,
+cdef DOUBLE my_eval(FUNCTION func, DOUBLE[:] x,
                         DOUBLE[:] buff, int nb_coord, MODE mode=VAL,
                         DOUBLE prox_param=1., DOUBLE prox_param2=1.) nogil:
     # Evaluate function func which is given as a chain of characters
     # (I did not manage to send lists of functions directly from python to cython)
-    if mode==PROX_CONJ:
-        return prox_conj(func_string, x, buff, nb_coord, prox_param, prox_param2)
-    
-    if func_string[0] == 's':
-        # Attention: reserved 1st letter as this function is bypassed in
-        #   algorithms.pyx for efficiency purposes
+    if mode == PROX_CONJ:
+        return prox_conj(func, x, buff, nb_coord, prox_param, prox_param2)
+
+    if func == SQUARE:
         return square(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == 'a':
+    elif func == ABS:
         return abs(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == 'n':
+    elif func == NORM2:
         return norm2(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == 'l':
-        if func_string[1] == 'i':
-            return linear(x, buff, nb_coord, mode, prox_param)
-        elif func_string[1] == 'o':
-            if func_string[3] == '1':
-                return log1pexp(x, buff, nb_coord, mode, prox_param)
-            if func_string[3] == 's':
-                return logsumexp(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == 'b':
+    elif func == LINEAR:
+        return linear(x, buff, nb_coord, mode, prox_param)
+    elif func == LOG1PEXP:
+        return log1pexp(x, buff, nb_coord, mode, prox_param)
+    elif func == LOGSUMEXP:
+        return logsumexp(x, buff, nb_coord, mode, prox_param)
+    elif func == BOX_ZERO_ONE:
         return box_zero_one(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == 'e':
+    elif func == EQ_CONST:
         return eq_const(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == 'i':
+    elif func == INEQ_CONST:
         return ineq_const(x, buff, nb_coord, mode, prox_param)
-    elif func_string[0] == 'z':
+    elif func == ZERO:
         return zero(x, buff, nb_coord, mode, prox_param)
     else:
         return -INF
@@ -98,7 +121,7 @@ cdef inline DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, 
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("square", x, buff, nb_coord)
+        return val_conj_not_implemented(SQUARE, x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             val += x[i] * x[i]
@@ -144,7 +167,7 @@ cdef inline DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOU
         for i in range(nb_coord):
             if fabs(x[i]) > 1.00000001:
                 return INF
-        return 0 # val_conj_not_implemented("abs", x, buff, nb_coord)
+        return 0 # val_conj_not_implemented(ABS, x, buff, nb_coord)
     else:  # mode == VAL
         val = 0.
         for i in range(nb_coord):
@@ -211,7 +234,7 @@ cdef inline DOUBLE linear(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, 
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("linear", x, buff, nb_coord)
+        return val_conj_not_implemented(LINEAR, x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             val += x[0]
@@ -242,7 +265,7 @@ cdef inline DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("log1pexp", x, buff, nb_coord)
+        return val_conj_not_implemented(LOG1PEXP, x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 30.:
@@ -280,7 +303,7 @@ cdef inline DOUBLE logsumexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mod
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("logsumexp", x, buff, nb_coord)
+        return val_conj_not_implemented(LOGSUMEXP, x, buff, nb_coord)
     else:  # mode == VAL
         return max_x + log(sum_exp_x)
 
@@ -306,7 +329,7 @@ cdef inline DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE 
                 return 0
         return 1
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("box_zero_one", x, buff, nb_coord)
+        return val_conj_not_implemented(BOX_ZERO_ONE, x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 1.:
@@ -335,7 +358,7 @@ cdef inline DOUBLE eq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode
         return 1
     elif mode == VAL_CONJ:
         return 0.
-        # return val_conj_not_implemented("eq_const", x, buff, nb_coord)
+        # return val_conj_not_implemented(EQ_CONST, x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 0:
@@ -366,7 +389,7 @@ cdef inline DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mo
                 return 0
         return 1
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("ineq_const", x, buff, nb_coord)
+        return val_conj_not_implemented(INEQ_CONST, x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] < 0:
@@ -391,7 +414,7 @@ cdef inline DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DO
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented("zero", x, buff, nb_coord)
+        return val_conj_not_implemented(ZERO, x, buff, nb_coord)
     else:  # mode == VAL
         return 0.
 

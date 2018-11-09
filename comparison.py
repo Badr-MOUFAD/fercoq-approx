@@ -8,10 +8,11 @@ import time
 # imports for loading datasets
 from scipy import io
 from sklearn.datasets.mldata import fetch_mldata
+from sklearn.datasets import load_svmlight_files
 from sklearn.externals.joblib import Memory
 import sys
-sys.path.append("../tv_l1_solver")
-from load_poldrack import load_gain_poldrack
+# sys.path.append("../tv_l1_solver")
+# from load_poldrack import load_gain_poldrack
 
 # imports for solvers
 import cd_solver
@@ -102,10 +103,11 @@ if 0:
 
 if 1:
     print("dual SVM on rcv1")
-    data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+    # data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+    data = load_svmlight_files(['../../scikit_learn_data/mldata/rcv1_train.binary'])
 
-    X = data['X'].astype(np.float)
-    y = data['y'].astype(np.float).ravel()
+    X = data[0].astype(np.float)
+    y = data[1].astype(np.float).ravel()
 
     max_iter_svm = 10
     alpha = 0.1

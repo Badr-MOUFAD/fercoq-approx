@@ -22,6 +22,7 @@ from algorithms cimport one_step_accelerated_coordinate_descent
 from algorithms cimport RAND_R_MAX
 
 from algorithms import find_dual_variables_to_update, variable_restart
+from atoms import string_to_enum
 
 # The following three functions are copied from Scikit Learn.
 
@@ -209,37 +210,37 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] bh = pb.bh
 
     cdef int f_present = pb.f_present
-    cdef unsigned char** f
+    cdef FUNCTION* f
     if f_present is True:
-        f = <unsigned char**>malloc(len(pb.f)*sizeof(char*))
+        f = <FUNCTION*>malloc(len(pb.f)*sizeof(FUNCTION))
         for j in range(len(pb.f)):
-            if sys.version_info[0] > 2 and isinstance(pb.f[j], bytes) == False:
+            if sys.version_info[0] > 2 and isinstance(pb.f[j], bytes) == True:
                 pb.f[j] = pb.f[j].encode()
-            f[j] = <bytes>pb.f[j]
+            f[j] = string_to_enum(<bytes>pb.f[j])
     else:
-        f = <unsigned char**>malloc(0)  # just to remove uninitialized warning
+        f = <FUNCTION*>malloc(0)  # just to remove uninitialized warning
 
     cdef int g_present = pb.g_present
-    cdef unsigned char** g
+    cdef FUNCTION* g
     if g_present is True:
-        g = <unsigned char**>malloc(len(pb.g)*sizeof(char*))
+        g = <FUNCTION*>malloc(len(pb.g)*sizeof(FUNCTION))
         for ii in range(len(pb.g)):
-            if sys.version_info[0] > 2 and isinstance(pb.g[ii], bytes) == False:
+            if sys.version_info[0] > 2 and isinstance(pb.g[ii], bytes) == True:
                 pb.g[ii] = pb.g[ii].encode()
-            g[ii] = <bytes>pb.g[ii]
+            g[ii] = string_to_enum(<bytes>pb.g[ii])
     else:
-        g = <unsigned char**>malloc(0)  # just to remove uninitialized warning
+        g = <FUNCTION*>malloc(0)  # just to remove uninitialized warning
 
     cdef int h_present = pb.h_present
-    cdef unsigned char** h
+    cdef FUNCTION* h
     if h_present is True:
-        h = <unsigned char**>malloc(len(pb.h)*sizeof(char*))
+        h = <FUNCTION*>malloc(len(pb.h)*sizeof(FUNCTION))
         for jh in range(len(pb.h)):
-            if sys.version_info[0] > 2 and isinstance(pb.h[jh], bytes) == False:
+            if sys.version_info[0] > 2 and isinstance(pb.h[jh], bytes) == True:
                 pb.h[jh] = pb.h[jh].encode()
-            h[jh] = <bytes>pb.h[jh]
+            h[jh] = string_to_enum(<bytes>pb.h[jh])
     else:
-        h = <unsigned char**>malloc(0)  # just to remove uninitialized warning
+        h = <FUNCTION*>malloc(0)  # just to remove uninitialized warning
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
 
     # We have two kind of dual vectors so the user may use any of them to initialize
@@ -592,5 +593,3 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     free(f)
     free(g)
     free(h)
-
-

@@ -22,12 +22,28 @@ cdef enum MODE:
     LIPSCHITZ = 5
     IS_KINK = 6
 
+cdef enum FUNCTION:
+    SQUARE = 0
+    ABS = 1
+    NORM2 = 2
+    LINEAR = 3
+    LOG1PEXP = 4
+    LOGSUMEXP = 5
+    BOX_ZERO_ONE = 6
+    EQ_CONST = 7
+    INEQ_CONST = 8
+    ZERO = 9
+
+    # To add a new function:
+    #   - add a lign to this enum
+    #   - code the corresponding lign in string_to_enum
+    #   - add a lign to my_eval
+    #   - code the function
+
+
 cdef int STRING_LONG_ENOUGH = 6
 
-cdef DOUBLE my_eval(unsigned char* func_string, DOUBLE[:] x,
+cdef DOUBLE my_eval(FUNCTION func, DOUBLE[:] x,
                         DOUBLE[:] buff, int nb_coord, MODE mode=*,
                         DOUBLE prox_param=*, DOUBLE prox_param2=*) nogil
 
-# func_string can be:
-#    "square", "abs", "norm2", "linear", "log1pexp", "box_zero_one", 
-#    "eq_const", "ineq_cont", "zero"

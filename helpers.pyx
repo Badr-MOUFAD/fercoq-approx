@@ -5,9 +5,10 @@
 
 import numpy as np
 import sys
+from atoms import string_to_enum
 
 
-cdef void compute_primal_value(pb, unsigned char** f, unsigned char** g, unsigned char** h,
+cdef void compute_primal_value(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* val, DOUBLE* infeas):
@@ -50,7 +51,7 @@ cdef void compute_primal_value(pb, unsigned char** f, unsigned char** g, unsigne
 
 
 
-cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsigned char** h,
+cdef DOUBLE compute_smoothed_gap(pb, FUNCTION* f, FUNCTION* g, FUNCTION* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx, DOUBLE[:] Sy,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* beta, DOUBLE* gamma):
@@ -197,30 +198,30 @@ cdef DOUBLE compute_smoothed_gap(pb, unsigned char** f, unsigned char** g, unsig
 
 
 def check_grad(f, x, nb_coord=1, shift=1e-6):
-    if sys.version_info[0] > 2:
+    if sys.version_info[0] > 2 and isinstance(f, bytes) == True:
         f = f.encode()
-    cdef unsigned char* f_str = <bytes> f
+    cdef FUNCTION func = string_to_enum(<bytes> f)
     cdef DOUBLE[:] x_ = np.array(x, dtype='float')
     cdef DOUBLE[:] grad = np.array(x_).copy()
-    my_eval(f_str, x_, grad, nb_coord, mode=GRAD)
+    my_eval(func, x_, grad, nb_coord, mode=GRAD)
     cdef DOUBLE[:] grad_finite_diffs = np.array(x_).copy()
     cdef DOUBLE[:] x_shift = np.array(x_).copy()
     cdef int i
     cdef DOUBLE error = 0.
     for i in range(nb_coord):
         x_shift[i] = x_[i] + shift
-        grad_finite_diffs[i] = (my_eval(f_str, x_shift, grad, nb_coord=nb_coord, mode=VAL)
-                                    - my_eval(f_str, x_, grad, nb_coord=nb_coord, mode=VAL)) / shift
+        grad_finite_diffs[i] = (my_eval(func, x_shift, grad, nb_coord=nb_coord, mode=VAL)
+                                    - my_eval(func, x_, grad, nb_coord=nb_coord, mode=VAL)) / shift
         x_shift[i] = x_[i]
         error += (grad_finite_diffs[i] - grad[i])**2
     return sqrt(error), np.array(grad), np.array(grad_finite_diffs)
 
 
 def my_eval_python(f, x, nb_coord=1, mode=0):
-    if sys.version_info[0] > 2:
+    if sys.version_info[0] > 2 and isinstance(f, bytes) == True:
         f = f.encode()
-    cdef unsigned char* f_str = <bytes> f
+    cdef FUNCTION func = string_to_enum(<bytes> f)
     cdef DOUBLE[:] x_ = np.array(x, dtype='float')
     cdef DOUBLE[:] buff_x = np.array(x_).copy()
-    val = my_eval(f_str, x_, buff_x, nb_coord, mode=mode)
+    val = my_eval(func, x_, buff_x, nb_coord, mode=mode)
     return val, np.array(buff_x)
