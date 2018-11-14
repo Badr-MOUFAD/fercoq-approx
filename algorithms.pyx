@@ -1,5 +1,3 @@
-# cython: profile=True
-
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True algorithms.pyx
 
@@ -60,6 +58,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+        UINT32_t per_pass,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
     # Algorithm described in O. Fercoq and P. Bianchi (2015).
     #     A coordinate descent primal-dual algorithm with large step size
@@ -70,8 +69,8 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
     cdef UINT32_t ii, i, coord, j, jh, l, lh, jj, j_prev
     cdef UINT32_t nb_coord
     cdef int focus_on_kink_or_not = 0
-    cdef DOUBLE dy
-    for f_iter in range(n):
+    cdef DOUBLE dy, dxi
+    for f_iter in range(n * per_pass):
         if sampling_law == 0:
             ii = rand_int(n, rand_r_state)
         else:  # sampling_law == 1:
@@ -151,7 +150,8 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
                 coord = blocks[ii] + i
                 buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
             g[ii](buff_x, buff, nb_coord, PROX,
-                  cg[ii]*Dg_data[ii]**2*primal_step_size[ii], useless_param)
+                  cg[ii]*Dg_data[ii]*Dg_data[ii]*primal_step_size[ii],
+                  useless_param)
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 x[coord] = (buff[i] + bg[coord]) / Dg_data[ii]
@@ -160,15 +160,16 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         for i in range(nb_coord):
             coord = blocks[ii] + i
             if x_ii[i] != x[coord]:
+                dxi = x[coord] - x_ii[i]
                 if f_present is True:
                     for l in range(Af_indptr[coord], Af_indptr[coord+1]):
                         j = Af_indices[l]
-                        rf[j] += Af_data[l] * (x[coord] - x_ii[i])
+                        rf[j] += Af_data[l] * dxi
                 if h_present is True:
                     for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                         jh = Ah_indices[lh]
-                        rhx[jh] += Ah_data[lh] * (x[coord] - x_ii[i])
-                change_in_x[0] += fabs(x_ii[i] - x[coord])
+                        rhx[jh] += Ah_data[lh] * dxi
+                change_in_x[0] += fabs(dxi)
     return
 
 
@@ -234,6 +235,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah, 
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+        UINT32_t per_pass,
         DOUBLE* change_in_x) nogil:
     # if h_present is False and restart_period == 0:
     # Algorithm described in O. Fercoq and P. Richtárik. (2015).
@@ -249,11 +251,11 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
     #   convex optimization. In NIPS proceedings (pp. 5852-5861).
 
     cdef UINT32_t i, ii, coord, j, jh, l, lh, jj, j_prev
-    cdef DOUBLE dy
+    cdef DOUBLE dy, dxei, dxci
     cdef DOUBLE primal_step_size
     cdef UINT32_t nb_coord
     
-    for f_iter in range(n):
+    for f_iter in range(n * per_pass):
         if sampling_law == 0:
             ii = rand_int(n, rand_r_state)
         else:  # sampling_law == 1:
@@ -335,7 +337,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                 coord = blocks[ii] + i
                 buff_x[i] = Dg_data[ii] * xe[coord] - bg[coord]
             g[ii](buff_x, buff, nb_coord, PROX,
-                  cg[ii]*Dg_data[ii]**2*primal_step_size*theta0/theta[0],
+                  cg[ii]*Dg_data[ii]*Dg_data[ii]*primal_step_size*theta0/theta[0],
                   useless_param)
             for i in range(nb_coord):
                 coord = blocks[ii] + i
@@ -350,18 +352,20 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         for i in range(nb_coord):
             coord = blocks[ii] + i
             if xe_ii[i] != xe[coord]:
+                dxei = xe[coord] - xe_ii[i]
+                dxci = xc[coord] - xc_ii[i]
                 if f_present is True:
                     for l in range(Af_indptr[coord], Af_indptr[coord+1]):
                         j = Af_indices[l]
-                        rfe[j] += Af_data[l] * (xe[coord] - xe_ii[i])
-                        rfc[j] += Af_data[l] * (xc[coord] - xc_ii[i])
+                        rfe[j] += Af_data[l] * dxei
+                        rfc[j] += Af_data[l] * dxci
 
                 if h_present is True:
                     for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                         jh = Ah_indices[lh]
-                        rhxe[jh] += Ah_data[lh] * (xe[coord] - xe_ii[i])
-                        rhxc[jh] += Ah_data[lh] * (xc[coord] - xc_ii[i])
-                change_in_x[0] += fabs(xe_ii[i] - xe[coord])
+                        rhxe[jh] += Ah_data[lh] * dxei
+                        rhxc[jh] += Ah_data[lh] * dxci
+                change_in_x[0] += fabs(dxei)
 
         # Update momentum parameters
         c_theta[0] *= (1. - theta[0])

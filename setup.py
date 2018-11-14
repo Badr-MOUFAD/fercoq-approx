@@ -7,9 +7,9 @@ import os
 from os.path import join
 import numpy
 import warnings
+from numpy.distutils.misc_util import Configuration
 
 def configuration():
-    from numpy.distutils.misc_util import Configuration
 
     config = Configuration('')
     
@@ -28,5 +28,4 @@ def configuration():
     return config
 
 if __name__ == '__main__':
-    from numpy.distutils.core import setup
     setup( **configuration().todict() )

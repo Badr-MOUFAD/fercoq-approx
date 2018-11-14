@@ -29,7 +29,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [8, 10, 11, 12, 13]
+probs = [1]
 
 for prob in probs:
     if prob == 0:
@@ -65,10 +65,13 @@ for prob in probs:
 
         pb_leukemia_lasso_acc = copy.copy(pb_leukemia_lasso)
         
-        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=100, verbose=1, print_style='smoothed_gap')
+        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=200,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-4)
 
         print("Lasso on Leukemia with momentum and variable restart")
-        cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=100, verbose=1, print_style='smoothed_gap', accelerated=True, restart_period=4)
+        cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=200,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-4,
+                    accelerated=True, restart_period=4)
 
     if prob == 2:
         # Logistic regression
@@ -76,7 +79,7 @@ for prob in probs:
         pb_leukemia_logreg = cd_solver.Problem(N=X.shape[1],
                                                f=["log1pexp"] * X.shape[0],
                                                Af=(X.T.multiply(y)).T,
-                                               bf=y,
+                                               bf=0*y,
                                                cf=[1] * X.shape[0],
                                                g=["square"] * X.shape[1],
                                                cg=[0.5*0.01*np.linalg.norm(X.T.dot(y), np.inf)] * X.shape[1])
@@ -270,7 +273,7 @@ for prob in probs:
         except:
             print('fMRI dataset not loaded')
     if prob == 10:
-        # LP  --  min c.dot(x) : Mx <= b
+        # LP  --  min c.dot(x) : x >= 0, Mx <= b
         print('basic LP')
         d = 3
         n = 4
@@ -336,7 +339,7 @@ for prob in probs:
         pb_iris_multinomial = cd_solver.Problem(N=N,
                 f=f,
                 Af=Af,
-                bf=np.concatenate((Y,[0])),
+                bf=np.zeros(Af.shape[0]),
                 cf=[1.]*len(f),
                 blocks_f=blocks_f,
                 g=["norm2"]*n_features,

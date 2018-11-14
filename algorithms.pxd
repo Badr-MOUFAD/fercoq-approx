@@ -29,6 +29,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+	UINT32_t per_pass,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil
 
 cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
@@ -52,4 +53,5 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+	UINT32_t per_pass,
         DOUBLE* change_in_x) nogil

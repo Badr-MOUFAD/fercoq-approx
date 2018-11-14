@@ -1,5 +1,3 @@
-# cython: profile=True
-
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
 
@@ -157,21 +155,25 @@ class Problem:
 
 
 
-def coordinate_descent(pb, max_iter=1000, max_time=1000.,
+def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            verbose=0, print_style='classical',
-                           min_change_in_x=1e-15, step_size_factor=1.,
+                           min_change_in_x=1e-15, tolerance=0,
+                           check_period=10, step_size_factor=1.,
                            sampling='uniform', int accelerated=False,
-                           restart_period=0, callback=None, int per_pass=1):
+                           int restart_period=0, callback=None, int per_pass=1):
     # pb is a Problem as defined above
     # max_iter: maximum number of passes over the data
     # max_time: in seconds
     # verbose: if positive, time between two prints
     # print_style: 'classical' or 'smoothed_gap'
     # min_change_in_x: stopping criterion
+    # tolerance: stopping criterion wrt smoothed gap
+    # check_period: period for smoothed gap computation
     # step_size_factor: number to balance primal and dual step sizes
     # sampling: either 'uniform' or 'kink_half'
     # accelerated: if True, the algorithm with momentum is implemented
     # restart_period: initial restart period for accelerated method
+    # per_pass: number of times we go through the data before releasing the gil
     #
     # For details on the algorithms, see algorithms.pyx
     
@@ -412,6 +414,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     else:
         active_set = np.empty(0, dtype=np.uint32)
 
+    iter_last_check = 0
     cdef DOUBLE primal_val = 0.
     cdef DOUBLE infeas = 0.
     cdef DOUBLE dual_val = 0.
@@ -435,10 +438,10 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         elif print_style == 'smoothed_gap':
                             print("elapsed time\titer\tfunction value infeasibility\tsmoothed gap \tbeta     gamma  \tchange in x\tchange in y")
 
-        nb_prints = 0
+    nb_prints = 0
 
     # code in the case bloks_g = blocks only for the moment
-    for iter in range(int(max_iter)):
+    for iter in range(0, max_iter, per_pass):
         if callback is not None:
             if callback(x, Sy, rf, rhx): break
 
@@ -458,11 +461,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         change_in_x = 0.
         change_in_y = 0.
 
-        if 1:
-        # with nogil:
-
-            if accelerated == False:
-                one_step_coordinate_descent(x,
+        if accelerated == False:
+            one_step_coordinate_descent(x,
                     y, Sy, prox_y, rhx, rf, rhy, rhy_ii,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
@@ -476,9 +476,9 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     f, g, h, f_present, g_present, h_present,
                     primal_step_size, dual_step_size,
                     sampling_law, rand_r_state, active_set, n_active, n,
-                    &change_in_x, &change_in_y)
-            else:
-                one_step_accelerated_coordinate_descent(x,
+                    per_pass, &change_in_x, &change_in_y)
+        else:
+            one_step_accelerated_coordinate_descent(x,
                     xe, xc, y_center, prox_y, rhxe, rhxc, rfe, rfc,
                     rhy, &theta, theta0, &c_theta, &beta,
                     buff_x, buff_y, buff, xe_ii, xc_ii, grad,
@@ -490,7 +490,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     f, g, h, f_present, g_present, h_present,
                     Lf, norm2_columns_Ah, 
                     sampling_law, rand_r_state, active_set, n_active, n,
-                    &change_in_x)
+                    per_pass, &change_in_x)
 
         if accelerated is True and restart_period > 0:
             do_restart, next_period = variable_restart(restart_history,
@@ -509,10 +509,20 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                 c_theta = 1.
 
         elapsed_time = time.time() - init_time
-        if verbose > 0:
-            if (elapsed_time > nb_prints * verbose
-                    or change_in_x + change_in_y < min_change_in_x or elapsed_time > max_time
+        if verbose > 0 or tolerance > 0:
+            if ((verbose > 0 and elapsed_time > nb_prints * verbose)
+                    or change_in_x + change_in_y < min_change_in_x
+                    or elapsed_time > max_time
                     or iter >= max_iter-1):
+                print_time = True
+                nb_prints += 1
+            else:
+                print_time = False
+            if tolerance > 0 and iter - iter_last_check >= check_period:
+                check_time = True
+            else:
+                check_time = False
+            if print_time == True or check_time == True:
                 # Compute value
                 if accelerated is True:
                     for i in range(N):
@@ -524,9 +534,10 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                         for l in range(pb.Ah.shape[0]):
                             rhx[l] = rhxe[l] + c_theta * rhxc[l]
                             
-                compute_primal_value(pb, f, g, h, x, rf, rhx, buff_x, buff_y, buff,
+                compute_primal_value(pb, f, g, h, x, rf, rhx,
+                                         buff_x, buff_y, buff,
                                          &primal_val, &infeas)
-                if print_style == 'classical':
+                if print_style == 'classical' and print_time == True:
                     if h_present is True and h_takes_infinite_values is False:
                         print("%.5f \t %d \t %+.5e \t %.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, change_in_x, change_in_y))
@@ -536,7 +547,8 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     else:  # h_present is False
                         print("%.5f \t %d \t %+.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, change_in_x))
-                elif print_style == 'smoothed_gap':
+                elif print_style == 'smoothed_gap' or tolerance > 0:
+                    # When we print, we check
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
                         for j in range(len(pb.h)):
@@ -565,13 +577,20 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                                         rf, rhx, prox_y,
                                         buff_x, buff_y, buff,
                                         &beta_print, &gamma_print)
-                    
-                    print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
+
+                    if print_time == True:
+                        print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
                               %(elapsed_time, iter, primal_val, infeas,
                                 smoothed_gap, beta_print, gamma_print,
                                 change_in_x, change_in_y))
-
-                nb_prints += 1
+                    if smoothed_gap < tolerance and beta_print < tolerance \
+                           and gamma_print < tolerance:
+                        print("Target tolerance reached: stopping "
+                                  "the algorithm at smoothed_gap=%.5e, "
+                                  "beta=%.5e, gamma=%.5e"
+                                  %(smoothed_gap, beta_print, gamma_print))
+                        break
+                iter_last_check = iter
 
         if elapsed_time > max_time:
             print("Time limit reached: stopping the algorithm after %f s"

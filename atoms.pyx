@@ -1,5 +1,3 @@
-# cython: profile=True
-
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False atoms.pyx
 

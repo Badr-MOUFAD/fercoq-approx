@@ -19,21 +19,24 @@ import cd_solver
 from sklearn import linear_model
 from sklearn import svm
 
+
+skip_pure_python = False
+
 def cd_pure_python(f, Af, bf, g, max_iter=100):
     N = Af.shape[1]
     x = np.zeros(N)
     r = np.matrix(Af.dot(x) - bf).T
-    Lip = (Af.multiply(Af)).sum(axis=0) * f(r, mode='Lipschitz')
+    Lip = np.array((Af.multiply(Af)).sum(axis=0)).ravel() \
+                 * f(r, mode='Lipschitz')
     step_size = 1. / Lip
     for k in range(max_iter):
-        print('iter = ', k)
         for f_iter in range(N):
             i = np.random.randint(N)
             x_ii = x[i]
-            tmp = g[i](x[i] - step_size[0,i] * Af[:,i].T.dot(f(r, mode='grad'))[0,0],
+            x[i] = g[i](x[i] - step_size[i]
+                           * Af[:,i].T.dot(f(r, mode='grad')),
                         mode='prox',
-                        prox_param=step_size[0,i])
-            x[i] = tmp
+                        prox_param=step_size[i])
             if x[i] != x_ii:
                 r = r + (x[i] - x_ii) * Af[:,i]
     return x
@@ -63,7 +66,8 @@ if 1:
     g_i = lambda x, mode, prox_param: abs_prox(x, mode, prox_param * alpha)
 
     start_time = time.time()
-    cd_pure_python(half_squares, X, y, [g_i]*X.shape[1], max_iter=max_iter)
+    if skip_pure_python is False:
+        cd_pure_python(half_squares, X, y, [g_i]*X.shape[1], max_iter=max_iter)
     time_cd_pure_python_leukemia_lasso = time.time() - start_time
 
     pb_leukemia_lasso = cd_solver.Problem(N=X.shape[1],
@@ -73,7 +77,8 @@ if 1:
                                           bf=y,
                                           cf=[0.5],
                                           g=["abs"] * X.shape[1],
-                                          cg=[alpha] * X.shape[1])
+                                          cg=[alpha] * X.shape[1]
+                                         )
 
     #import pstats, cProfile
     #
@@ -85,29 +90,32 @@ if 1:
     #s = pstats.Stats("Profile.prof")
     #s.strip_dirs().sort_stats("time").print_stats()
 
+    nb_repeat = 1
     start_time = time.time()
-    cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=max_iter, verbose=0)
+    for i in range(nb_repeat):
+        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=max_iter, verbose=0, per_pass=1)
     time_cd_solver_leukemia_lasso = time.time() - start_time
 
     start_time = time.time()
-    alphas, coefs, gaps = linear_model.lasso_path(X, y, alphas=[alpha/X.shape[0]],
+    for i in range(nb_repeat):
+        alphas, coefs, gaps = linear_model.lasso_path(X, y, alphas=[alpha/X.shape[0]],
                                          precompute=False, tol=1e-15,
                                          verbose=0, max_iter=max_iter,
                                          selection='random')
     time_sklearn_leukemia_lasso = time.time() - start_time
 
     print(time_cd_pure_python_leukemia_lasso,
-              time_cd_solver_leukemia_lasso, time_sklearn_leukemia_lasso)
+              time_cd_solver_leukemia_lasso / nb_repeat, time_sklearn_leukemia_lasso / nb_repeat)
     print(np.linalg.norm(coefs.ravel() - pb_leukemia_lasso.sol) / np.linalg.norm(coefs.ravel()))
 
 
 if 1:
     print("dual SVM on rcv1")
-    # data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
-    data = load_svmlight_files(['../../scikit_learn_data/mldata/rcv1_train.binary'])
+    data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+    # data = load_svmlight_files(['../../scikit_learn_data/mldata/rcv1_train.binary'])
 
-    X = data[0].astype(np.float)
-    y = data[1].astype(np.float).ravel()
+    X = data['X'].astype(np.float)
+    y = data['y'].astype(np.float).ravel()
 
     max_iter_svm = 10
     alpha = 0.1
@@ -126,7 +134,8 @@ if 1:
     g_i = lambda x, mode, prox_param: proj_01(x, mode, prox_param * alpha)
     
     start_time = time.time()
-    cd_pure_python(f_svm, sp.vstack([X.T.multiply(y), -np.ones(X.shape[0])], format="csc"), np.zeros(X.shape[1]+1), [g_i]*X.shape[1], max_iter=max_iter_svm)
+    if skip_pure_python is False:
+        cd_pure_python(f_svm, sp.vstack([X.T.multiply(y), -np.ones(X.shape[0])], format="csc"), np.zeros(X.shape[1]+1), [g_i]*X.shape[1], max_iter=max_iter_svm)
     time_cd_pure_python_rcv1_svm = time.time() - start_time
     
     pb_rcv1_svm = cd_solver.Problem(N=X.shape[0],
