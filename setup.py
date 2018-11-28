@@ -22,6 +22,9 @@ def configuration():
     config.add_extension(name='algorithms',
                          sources=['algorithms.cpp'])
     
+    config.add_extension(name='screening',
+                         sources=['screening.cpp'])
+    
     config.add_extension(name='cd_solver',
                          sources=['cd_solver.cpp'])
         

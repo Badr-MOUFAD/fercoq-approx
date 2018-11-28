@@ -1,8 +1,9 @@
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True algorithms.pyx
 
-# definitions in algorithms.pxd
+# C definitions in algorithms.pxd
 import numpy as np
+
 
 cdef inline UINT32_t our_rand_r(UINT32_t* seed) nogil:
     seed[0] ^= <UINT32_t>(seed[0] << 13)
@@ -57,7 +58,8 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         int sampling_law, UINT32_t* rand_r_state,
-        UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+        UINT32_t[:] active_set, UINT32_t n_active, 
+        UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
         UINT32_t per_pass,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
     # Algorithm described in O. Fercoq and P. Bianchi (2015).
@@ -70,17 +72,21 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
     cdef UINT32_t nb_coord
     cdef int focus_on_kink_or_not = 0
     cdef DOUBLE dy, dxi
+    if n_active == 0:
+        return
     for f_iter in range(n * per_pass):
         if sampling_law == 0:
-            ii = rand_int(n, rand_r_state)
+            ii = rand_int(n_active, rand_r_state)
+            ii = active_set[ii]
         else:  # sampling_law == 1:
             # probability 1/2 to focus on non-kink points
             focus_on_kink_or_not = rand_int(2, rand_r_state)
-            if focus_on_kink_or_not == 0 or n_active == 0:
-                ii = rand_int(n, rand_r_state)
-            else:
+            if focus_on_kink_or_not == 0 or n_focus == 0:
                 ii = rand_int(n_active, rand_r_state)
                 ii = active_set[ii]
+            else:
+                ii = rand_int(n_focus, rand_r_state)
+                ii = focus_set[ii]  # focus_set is contained in active_set
     
         nb_coord = blocks[ii+1] - blocks[ii]
         if h_present is True:
@@ -234,7 +240,8 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         int f_present, int g_present, int h_present,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah, 
         int sampling_law, UINT32_t* rand_r_state,
-        UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+        UINT32_t[:] active_set, UINT32_t n_active, 
+        UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
         UINT32_t per_pass,
         DOUBLE* change_in_x) nogil:
     # if h_present is False and restart_period == 0:
@@ -261,11 +268,11 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         else:  # sampling_law == 1:
             # probability 1/2 to focus on non-kink points
             focus_on_kink_or_not = rand_int(2, rand_r_state)
-            if focus_on_kink_or_not == 0 or n_active == 0:
+            if focus_on_kink_or_not == 0 or n_focus == 0:
                 ii = rand_int(n, rand_r_state)
             else:
-                ii = rand_int(n_active, rand_r_state)
-                ii = active_set[ii]
+                ii = rand_int(n_focus, rand_r_state)
+                ii = focus_set[ii]
             
         primal_step_size = 1. / fmax(1e-30, Lf[ii] + norm2_columns_Ah[ii] / beta[0])
         nb_coord = blocks[ii+1] - blocks[ii]

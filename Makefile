@@ -8,6 +8,7 @@ debug:
 	cython --cplus atoms.pyx
 	cython --cplus helpers.pyx
 	cython --cplus algorithms.pyx
+	cython --cplus screening.pyx
 	cython --cplus cd_solver.pyx
 	python setup.py build_ext --inplace
 	python3 setup.py build_ext --inplace
@@ -23,6 +24,9 @@ helpers.cpp: atoms.cpp helpers.pyx helpers.pxd
 algorithms.cpp: atoms.cpp algorithms.pyx algorithms.pxd
 	cython --cplus -X boundscheck=False -X cdivision=True -X wraparound=False algorithms.pyx
 
-cd_solver.cpp: atoms.cpp helpers.cpp algorithms.cpp cd_solver.pyx
+screening.cpp: helpers.cpp screening.pyx screening.pxd
+	cython --cplus -X boundscheck=False -X cdivision=True -X wraparound=False screening.pyx
+
+cd_solver.cpp: atoms.cpp helpers.cpp algorithms.cpp screening.cpp cd_solver.pyx
 	cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
 

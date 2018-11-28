@@ -2,9 +2,12 @@
 # cython --cplus -X boundscheck=False atoms.pyx
 
 # definitions in atoms.pxd
+import numpy as np
 
-cdef DOUBLE INF = 1e30
+# Atom support for gap safe screening is defined in the file screening.pyx
 
+
+cdef DOUBLE INF = 1e20
 
 cdef atom string_to_func(bytes func_string):
     if func_string[0] == 's':

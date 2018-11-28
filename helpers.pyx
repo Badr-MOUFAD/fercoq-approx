@@ -2,10 +2,10 @@
 # cython --cplus -X boundscheck=False -X cdivision=True helpers.pyx
 
 # C definitions in helpers.pxd
-
 import numpy as np
 import sys
 
+cdef DOUBLE INF = 1e20
 
 cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
@@ -52,30 +52,48 @@ cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
 
 
 cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
-                             DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx, DOUBLE[:] Sy,
+                             DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+                             DOUBLE[:] Sy, DOUBLE[:] z, DOUBLE[:] AfTz,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
-                             DOUBLE* beta, DOUBLE* gamma):
+                             DOUBLE* beta, DOUBLE* gamma, compute_z=True):
+    # We output z and AfTz because it is useful when doing variable screening
     cdef UINT32_t ii, i, j, jh, l, coord, nbcoord
     cdef DOUBLE val = 0.
-    z = np.zeros(pb.Af.shape[0])  # dual variable associated to f(Af x - bf)
-    if pb.f_present is True:
-        for j in range(len(pb.f)):
-            f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
-                 pb.blocks_f[j+1]-pb.blocks_f[j], GRAD,
-                 useless_param, useless_param)
-            for l in range(pb.blocks_f[j+1]-pb.blocks_f[j]):
-                coord = pb.blocks_f[j] + l
-                z[coord] = pb.cf[j] * buff[l]
-        val += z.dot(np.array(rf)) + pb.bf.dot(z)   # = f(Af x - bf) + f*(z) + bf.dot(z)
-        AfTz = pb.Af.T.dot(z)
+    if compute_z is True:
+        # z is the dual variable associated to f(Af x - bf)
+        if pb.f_present is True:
+            for j in range(len(pb.f)):
+                f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
+                     pb.blocks_f[j+1]-pb.blocks_f[j], GRAD,
+                     useless_param, useless_param)
+                for l in range(pb.blocks_f[j+1]-pb.blocks_f[j]):
+                    coord = pb.blocks_f[j] + l
+                    z[coord] = pb.cf[j] * buff[l]
+            val += np.array(z).dot(np.array(rf)) + pb.bf.dot(np.array(z))
+            #        = f(Af x - bf) + f*(z) + bf.dot(z)
+            AfTz_ = pb.Af.T.dot(np.array(z))
+            for i in range(pb.N):
+                AfTz[i] = AfTz_[i]  # otherwise the pointer seems to be broken
+        # else: AfTz is initialized with np.zeros(pb.N)
     else:
-        AfTz = np.zeros(pb.N)
+        if pb.f_present is True:
+            for j in range(len(pb.f)):
+                val += pb.cf[j] * f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
+                     pb.blocks_f[j+1]-pb.blocks_f[j], VAL,
+                     useless_param, useless_param)
+                for l in range(pb.blocks_f[j+1]-pb.blocks_f[j]):
+                    coord = pb.blocks_f[j] + l
+                    buff_x[l] = z[coord] / pb.cf[j]
+                val +=  pb.cf[j] * f[j](buff_x, buff,
+                     pb.blocks_f[j+1]-pb.blocks_f[j], VAL_CONJ,
+                     useless_param, useless_param)
+            val += pb.bf.dot(np.array(z))
+            
     if pb.h_present is True:
         AhTSy = pb.Ah.T.dot(np.array(Sy))
     else:
         AhTSy = np.zeros(pb.N)
 
-    cdef DOUBLE INF = 1e20
     cdef DOUBLE[:] xbar = np.zeros(pb.N, dtype=float)
     cdef DOUBLE[:] ybar = np.zeros(pb.Ah.shape[0], dtype=float)
     if pb.g_present is True:
@@ -134,6 +152,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                 val_g2 -= (AfTz[coord] + AhTSy[coord]) * xbar[coord]
                 val_g3 -= gamma[0] / 2. * (xbar[coord] - x[coord])**2
         val += val_g + val_g1 + val_g2 + val_g3
+        # print('contrib_g=', val_g + val_g1 + val_g2 + val_g3, val_g, val_g1, val_g2, val_g3)
 
     if pb.h_present is True:
         val_h = 0.

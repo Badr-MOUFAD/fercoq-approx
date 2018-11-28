@@ -1,4 +1,3 @@
-
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 
 import numpy as np
@@ -29,7 +28,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [1]
+probs = [3]
 
 for prob in probs:
     if prob == 0:
@@ -54,7 +53,6 @@ for prob in probs:
 
     if prob == 1:
         # Lasso
-        print("Lasso on Leukemia")
         pb_leukemia_lasso = cd_solver.Problem(N=X.shape[1],
                                               f=["square"] * X.shape[0],
                                               Af=X,
@@ -64,7 +62,14 @@ for prob in probs:
                                               cg=[0.1*np.linalg.norm(X.T.dot(y), np.inf)] * X.shape[1])
 
         pb_leukemia_lasso_acc = copy.copy(pb_leukemia_lasso)
+        pb_leukemia_lasso_screen = copy.copy(pb_leukemia_lasso)
         
+        print("Lasso on Leukemia with screening")
+        cd_solver.coordinate_descent(pb_leukemia_lasso_screen, max_iter=2000,
+                    verbose=2., print_style='smoothed_gap', tolerance=1e-9,
+                    screening='gapsafe')
+        
+        print("Lasso on Leukemia")
         cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=200,
                     verbose=1., print_style='smoothed_gap', tolerance=1e-4)
 
@@ -97,7 +102,14 @@ for prob in probs:
                                             cf=[0.5/alpha] * X.shape[1] + [1] * X.shape[0],
                                             g=["box_zero_one"] * X.shape[0])
 
-        cd_solver.coordinate_descent(pb_leukemia_svm, max_iter=100, verbose=0.5, print_style='smoothed_gap')
+        
+        pb_leukemia_svm_screen = copy.copy(pb_leukemia_svm)
+        
+        cd_solver.coordinate_descent(pb_leukemia_svm, max_iter=1000, verbose=0.5, print_style='smoothed_gap', tolerance=1e-14)
+        print("dual SVM on Leukemia with gap safe screening")
+
+        cd_solver.coordinate_descent(pb_leukemia_svm_screen, max_iter=1000, verbose=0.5, print_style='smoothed_gap', screening='gapsafe', tolerance=1e-14)
+
 
     if prob == 4:
         # Lasso by ISTA
