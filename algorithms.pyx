@@ -264,15 +264,17 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
     
     for f_iter in range(n * per_pass):
         if sampling_law == 0:
-            ii = rand_int(n, rand_r_state)
+            ii = rand_int(n_active, rand_r_state)
+            ii = active_set[ii]
         else:  # sampling_law == 1:
             # probability 1/2 to focus on non-kink points
             focus_on_kink_or_not = rand_int(2, rand_r_state)
             if focus_on_kink_or_not == 0 or n_focus == 0:
-                ii = rand_int(n, rand_r_state)
+                ii = rand_int(n_active, rand_r_state)
+                ii = active_set[ii]
             else:
                 ii = rand_int(n_focus, rand_r_state)
-                ii = focus_set[ii]
+                ii = focus_set[ii]  # focus_set is contained in active_set
             
         primal_step_size = 1. / fmax(1e-30, Lf[ii] + norm2_columns_Ah[ii] / beta[0])
         nb_coord = blocks[ii+1] - blocks[ii]

@@ -28,7 +28,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [3]
+probs = [1]
 
 for prob in probs:
     if prob == 0:
@@ -64,20 +64,21 @@ for prob in probs:
         pb_leukemia_lasso_acc = copy.copy(pb_leukemia_lasso)
         pb_leukemia_lasso_screen = copy.copy(pb_leukemia_lasso)
         
-        print("Lasso on Leukemia with screening")
-        cd_solver.coordinate_descent(pb_leukemia_lasso_screen, max_iter=2000,
-                    verbose=2., print_style='smoothed_gap', tolerance=1e-9,
-                    screening='gapsafe')
         
         print("Lasso on Leukemia")
-        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=200,
-                    verbose=1., print_style='smoothed_gap', tolerance=1e-4)
+        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=1000,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-10)
 
-        print("Lasso on Leukemia with momentum and variable restart")
-        cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=200,
-                    verbose=1., print_style='smoothed_gap', tolerance=1e-4,
-                    accelerated=True, restart_period=4)
-
+        print("Lasso on Leukemia with screening")
+        cd_solver.coordinate_descent(pb_leukemia_lasso_screen, max_iter=1000,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-10,
+                    screening='gapsafe')
+        
+        print("Lasso on Leukemia with screening, momentum and variable restart")
+        cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=1000,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-10,
+                    accelerated=True, restart_period=4, screening='gapsafe')
+        
     if prob == 2:
         # Logistic regression
         print("logistic regression on Leukemia")
