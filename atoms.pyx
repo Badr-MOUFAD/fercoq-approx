@@ -63,7 +63,7 @@ cdef DOUBLE prox_conj(atom func, DOUBLE[:] x,
     for i in range(nb_coord):
         x[i] /= prox_param  # trick to save a bit of memory
     func(x, buff, nb_coord, PROX,
-                prox_param2/prox_param, 1.)
+                prox_param2/prox_param, useless_param)
     for i in range(nb_coord):
         x[i] *= prox_param  # we undo the trick
         buff[i] = x[i] - prox_param * buff[i]
@@ -407,7 +407,7 @@ cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pr
 
 
 cdef DOUBLE error_atom(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil:
-    # Nonsense function
+    # Nonesense function
     cdef int i
     if mode == GRAD:
         for i in range(nb_coord):
