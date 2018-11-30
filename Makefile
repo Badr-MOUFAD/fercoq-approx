@@ -1,7 +1,7 @@
-all: cython
+all:
 	python3 setup.py build_ext --inplace
 
-python2: cython
+python2:
 	python2 setup.py build_ext --inplace
 
 debug:
@@ -29,4 +29,3 @@ screening.cpp: helpers.cpp screening.pyx screening.pxd
 
 cd_solver.cpp: atoms.cpp helpers.cpp algorithms.cpp screening.cpp cd_solver.pyx
 	cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
-
