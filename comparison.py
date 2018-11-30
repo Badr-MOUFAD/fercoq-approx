@@ -30,6 +30,7 @@ def cd_pure_python(f, Af, bf, g, max_iter=100):
                  * f(r, mode='Lipschitz')
     step_size = 1. / Lip
     for k in range(max_iter):
+        print(k)
         for f_iter in range(N):
             i = np.random.randint(N)
             x_ii = x[i]

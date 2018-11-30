@@ -10,6 +10,7 @@ from helpers import check_grad
 # imports for loading datasets
 from scipy import io
 from sklearn.datasets.mldata import fetch_mldata
+from sklearn.datasets import svmlight_format
 #from sklearn.externals.joblib import Memory
 #import sys
 #sys.path.append("../tv_l1_solver")
@@ -28,7 +29,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [1]
+probs = [7, 8, 10, 11, 12, 13]
 
 for prob in probs:
     if prob == 0:
@@ -167,10 +168,11 @@ for prob in probs:
     if prob == 7:
         print("dual SVM with intercept on RCV1")
 
-        data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+        data = svmlight_format.load_svmlight_file('/home/ofercoq/scikit_learn_data/mldata/rcv1_train.binary')
+        # data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
 
-        X = data['X'].astype(np.float)
-        y = data['y'].astype(np.float).ravel()
+        X = data[0].astype(np.float)
+        y = data[1].astype(np.float).ravel()
         
         C = 1. / X.shape[0]
         alpha = 0.25 / X.shape[0]

@@ -465,13 +465,12 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         
     cdef DOUBLE change_in_x
     cdef DOUBLE change_in_y
+    smoothed_gap, beta_print, gamma_print = 0., 0., 0.
 
     #----------------------- Main loop ----------------------------#
-    
     init_time = time.time()
     if verbose > 0:
         if print_style == 'classical':
-            smoothed_gap, beta_print, gamma_print = 0., 0., 0.
             if h_present is True and h_takes_infinite_values is False:
                 print("elapsed time \t iter \t function value  "
                           "change in x \t change in y")
