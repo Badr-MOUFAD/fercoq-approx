@@ -3,6 +3,8 @@
 
 from atoms cimport *
 # bonus: same imports as in atoms
+import numpy as np
+import sys
 
 cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
@@ -10,6 +12,7 @@ cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                              DOUBLE* val, DOUBLE* infeas)
 
 cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
-                             DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx, DOUBLE[:] Sy,
+                             DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+			     DOUBLE[:] Sy, DOUBLE[:] z, DOUBLE[:] AfTz,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
-                             DOUBLE* beta, DOUBLE* gamma)
+                             DOUBLE* beta, DOUBLE* gamma, compute_z=*)

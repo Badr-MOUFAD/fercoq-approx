@@ -21,14 +21,16 @@ cdef enum MODE:
     PROX_CONJ = 4
     LIPSCHITZ = 5
     IS_KINK = 6
+    POLAR_SUPPORT_KINK = 7
 
 
-cdef int STRING_LONG_ENOUGH = 6
+cdef DOUBLE INF = 1e20
 cdef DOUBLE useless_param = 0.
 
 ctypedef DOUBLE (*atom)(DOUBLE[:], DOUBLE[:], int, MODE, DOUBLE, DOUBLE) nogil
 
 cdef atom string_to_func(bytes func_string)
+
 
 cdef DOUBLE square(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil
 

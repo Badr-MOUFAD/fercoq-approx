@@ -3,6 +3,8 @@
 
 from atoms cimport *
 # bonus: same imports as in atoms
+from screening cimport do_gap_safe_screening, update_focus_set
+
 
 cdef enum:
     # Max value for our rand_r replacement (near the bottom).
@@ -28,7 +30,9 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
         int sampling_law, UINT32_t* rand_r_state,
-        UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+        UINT32_t[:] active_set, UINT32_t n_active,
+        UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
+	UINT32_t per_pass,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil
 
 cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
@@ -51,5 +55,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         int f_present, int g_present, int h_present,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah,
         int sampling_law, UINT32_t* rand_r_state,
-        UINT32_t[:] active_set, UINT32_t n_active, UINT32_t n,
+        UINT32_t[:] active_set, UINT32_t n_active,
+        UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
+	UINT32_t per_pass,
         DOUBLE* change_in_x) nogil

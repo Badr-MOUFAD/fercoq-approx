@@ -1,5 +1,3 @@
-# cython: profile=True
-
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
 
@@ -20,6 +18,7 @@ from helpers cimport compute_primal_value, compute_smoothed_gap
 from algorithms cimport one_step_coordinate_descent
 from algorithms cimport one_step_accelerated_coordinate_descent
 from algorithms cimport RAND_R_MAX
+from screening cimport polar_matrix_norm, do_gap_safe_screening, update_focus_set
 
 from algorithms import find_dual_variables_to_update, variable_restart
 
@@ -157,21 +156,27 @@ class Problem:
 
 
 
-def coordinate_descent(pb, max_iter=1000, max_time=1000.,
+def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            verbose=0, print_style='classical',
-                           min_change_in_x=1e-15, step_size_factor=1.,
+                           min_change_in_x=1e-15, tolerance=0,
+                           check_period=10, step_size_factor=1.,
                            sampling='uniform', int accelerated=False,
-                           restart_period=0, callback=None, int per_pass=1):
+                           int restart_period=0, callback=None, int per_pass=1,
+                           screening=None):
     # pb is a Problem as defined above
     # max_iter: maximum number of passes over the data
     # max_time: in seconds
     # verbose: if positive, time between two prints
     # print_style: 'classical' or 'smoothed_gap'
     # min_change_in_x: stopping criterion
+    # tolerance: stopping criterion wrt smoothed gap
+    # check_period: period for smoothed gap computation
     # step_size_factor: number to balance primal and dual step sizes
     # sampling: either 'uniform' or 'kink_half'
     # accelerated: if True, the algorithm with momentum is implemented
     # restart_period: initial restart period for accelerated method
+    # per_pass: number of times we go through the data before releasing the gil
+    # screening: if screening == 'gapsafe': do gap safe screening (Ndiaye et al)
     #
     # For details on the algorithms, see algorithms.pyx
     
@@ -328,7 +333,14 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
         rfc = np.zeros(rf.shape[0])
         rhxe = np.array(rhx).copy()
         rhxc = np.zeros(rhx.shape[0])
-            
+    else:
+        xe = np.empty(0)
+        xc = np.empty(0)
+        rfe = np.empty(0)
+        rfc = np.empty(0)
+        rhxe = np.empty(0)
+        rhxc = np.empty(0)
+
     cdef DOUBLE theta0 = 1. / n
     cdef DOUBLE theta = theta0
     cdef DOUBLE c_theta = 1.
@@ -359,9 +371,11 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
 
     # Compute Lipschitz constants
     cdef DOUBLE[:] tmp_Lf = np.zeros(len(pb.f))
+    cdef DOUBLE max_Lf = 0.
     for j in range(len(pb.f)):
-        tmp_Lf[j] = f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
+        tmp_Lf[j] = cf[j] * f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
                          LIPSCHITZ, useless_param, useless_param)
+        max_Lf = fmax(max_Lf, tmp_Lf[j])
     cdef DOUBLE[:] Lf = 1e-30 * np.ones(n)
     if f_present is True:
         for ii in range(n):
@@ -372,7 +386,7 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                 for l in range(Af_indptr[coord], Af_indptr[coord+1]):
                     jj = Af_indices[l]
                     j = inv_blocks_f[jj]
-                    Lf[ii] += cf[j] * Af_data[l]**2 * tmp_Lf[j]
+                    Lf[ii] += Af_data[l]**2 * tmp_Lf[j]
     del tmp_Lf
     cdef DOUBLE[:] primal_step_size = 1. / np.array(Lf)
     cdef DOUBLE[:] dual_step_size = np.zeros(pb.Ah.shape[0])
@@ -401,17 +415,48 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
     if sampling == 'kink_half':
         sampling_law = 1
-    cdef int n_active = n
-    cdef UINT32_t[:] active_set
+    cdef UINT32_t n_active = n
+    cdef UINT32_t n_focus = n
+    cdef UINT32_t[:] active_set = np.arange(n, dtype=np.uint32)
+    cdef DOUBLE[:] z = np.zeros(pb.Af.shape[0])  # useful for screening
+    cdef DOUBLE[:] AfTz = np.zeros(N)  # useful for screening
+    if screening == 'gapsafe' and h_present is True:
+        print('Gap safe screening not analyzed when h is present,'
+                  'we are deactivating it.')
+        screening = None
+    if screening == 'gapsafe':
+        g_norms_Af = [[] for ii in range(n)]
+        norms_Af = np.zeros(n)
+        for ii in range(n):
+            nb_coord = blocks[ii+1] - blocks[ii]
+            k = 0
+            l = Af_indptr[blocks[ii]]
+            norms_Af[ii] = polar_matrix_norm(abs,
+                            &Af_indptr[blocks[ii]], nb_coord,
+                            Af_indices, Af_data, 0)
+            while True:
+                polar_support_value = polar_matrix_norm(g[ii],
+                            &Af_indptr[blocks[ii]], nb_coord,
+                            Af_indices, Af_data, k)
+                if polar_support_value == -1.:
+                    # code for no more kinks
+                    break
+                else:
+                    g_norms_Af[ii].append(polar_support_value)
+                k = k + 1
+
+    cdef UINT32_t[:] focus_set
     if sampling_law == 1:
-        active_set = np.arange(n, dtype=np.uint32)
-        n_active = n
+        focus_set = np.arange(n, dtype=np.uint32)
+        n_focus = n
         if accelerated == True:
             theta0 = 0.5 / n
             theta = theta0
     else:
-        active_set = np.empty(0, dtype=np.uint32)
+        focus_set = np.empty(0, dtype=np.uint32)
 
+    cdef UINT32_t iter_last_check = -10
+    cdef UINT32_t offset = 0
     cdef DOUBLE primal_val = 0.
     cdef DOUBLE infeas = 0.
     cdef DOUBLE dual_val = 0.
@@ -426,43 +471,32 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
     init_time = time.time()
     if verbose > 0:
         if print_style == 'classical':
+            smoothed_gap, beta_print, gamma_print = 0., 0., 0.
             if h_present is True and h_takes_infinite_values is False:
-                print("elapsed time \t iter \t function value  change in x \t change in y")
+                print("elapsed time \t iter \t function value  "
+                          "change in x \t change in y")
             elif h_present is True and h_takes_infinite_values is True:
-                print("elapsed time \t iter \t function value  infeasibility \t change in x \t change in y")
+                print("elapsed time \t iter \t function value  "
+                          "infeasibility \t change in x \t change in y")
             else:
                 print("elapsed time \t iter \t function value  change in x")
         elif print_style == 'smoothed_gap':
-                            print("elapsed time\titer\tfunction value infeasibility\tsmoothed gap \tbeta     gamma  \tchange in x\tchange in y")
+                print("elapsed time\titer\tfunction value infeasibility"
+                              "\tsmoothed gap \tbeta     gamma  "
+                              "\tchange in x\tchange in y")
 
-        nb_prints = 0
+    nb_prints = 0
 
     # code in the case bloks_g = blocks only for the moment
-    for iter in range(int(max_iter)):
+    for iter in range(0, max_iter, per_pass):
         if callback is not None:
             if callback(x, Sy, rf, rhx): break
-
-        if sampling_law == 1 and g_present is True:
-            # update active_set
-            n_active = 0
-            for ii in range(n):
-                nb_coord = blocks[ii+1] - blocks[ii]
-                for i in range(nb_coord):
-                    coord = blocks[ii] + i
-                    buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
-                if g[ii](buff_x, buff, nb_coord, IS_KINK,
-                         useless_param, useless_param) == 0:
-                    active_set[n_active] = ii
-                    n_active += 1
 
         change_in_x = 0.
         change_in_y = 0.
 
-        if 1:
-        # with nogil:
-
-            if accelerated == False:
-                one_step_coordinate_descent(x,
+        if accelerated == False:
+            one_step_coordinate_descent(x,
                     y, Sy, prox_y, rhx, rf, rhy, rhy_ii,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
@@ -475,10 +509,11 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     ch, bh,
                     f, g, h, f_present, g_present, h_present,
                     primal_step_size, dual_step_size,
-                    sampling_law, rand_r_state, active_set, n_active, n,
-                    &change_in_x, &change_in_y)
-            else:
-                one_step_accelerated_coordinate_descent(x,
+                    sampling_law, rand_r_state, active_set, n_active,
+                    focus_set, n_focus, n,
+                    per_pass, &change_in_x, &change_in_y)
+        else:
+            one_step_accelerated_coordinate_descent(x,
                     xe, xc, y_center, prox_y, rhxe, rhxc, rfe, rfc,
                     rhy, &theta, theta0, &c_theta, &beta,
                     buff_x, buff_y, buff, xe_ii, xc_ii, grad,
@@ -489,30 +524,25 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                     Ah_col_indices, dual_vars_to_update, ch, bh,
                     f, g, h, f_present, g_present, h_present,
                     Lf, norm2_columns_Ah, 
-                    sampling_law, rand_r_state, active_set, n_active, n,
-                    &change_in_x)
-
-        if accelerated is True and restart_period > 0:
-            do_restart, next_period = variable_restart(restart_history,
-                                        iter, restart_period, next_period)
-            if do_restart is True:
-                xe = np.array(xe) + c_theta * np.array(xc)
-                rfe = np.array(rfe) + c_theta * np.array(rfc)
-                xc = np.zeros(x.shape[0])
-                rfc = np.zeros(rf.shape[0])
-                if h_present is True:
-                    rhxe = np.array(rhxe) + c_theta * np.array(rhxc)
-                    rhxc = np.zeros(rhx.shape[0])
-                    y_center = np.array(prox_y).copy()  # heuristic
-                theta = theta0
-                beta = beta0
-                c_theta = 1.
+                    sampling_law, rand_r_state, active_set, n_active,
+                    focus_set, n_focus, n,
+                    per_pass, &change_in_x)
 
         elapsed_time = time.time() - init_time
-        if verbose > 0:
-            if (elapsed_time > nb_prints * verbose
-                    or change_in_x + change_in_y < min_change_in_x or elapsed_time > max_time
+        if verbose > 0 or tolerance > 0:
+            if ((verbose > 0 and elapsed_time > nb_prints * verbose)
+                    or change_in_x + change_in_y < min_change_in_x
+                    or elapsed_time > max_time
                     or iter >= max_iter-1):
+                print_time = True
+                nb_prints += 1
+            else:
+                print_time = False
+            if tolerance > 0 and iter - iter_last_check >= check_period:
+                check_time = True
+            else:
+                check_time = False
+            if print_time == True or check_time == True:
                 # Compute value
                 if accelerated is True:
                     for i in range(N):
@@ -524,19 +554,23 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                         for l in range(pb.Ah.shape[0]):
                             rhx[l] = rhxe[l] + c_theta * rhxc[l]
                             
-                compute_primal_value(pb, f, g, h, x, rf, rhx, buff_x, buff_y, buff,
+                compute_primal_value(pb, f, g, h, x, rf, rhx,
+                                         buff_x, buff_y, buff,
                                          &primal_val, &infeas)
-                if print_style == 'classical':
+                if print_style == 'classical' and print_time == True:
                     if h_present is True and h_takes_infinite_values is False:
                         print("%.5f \t %d \t %+.5e \t %.5e \t %.5e"
-                                  %(elapsed_time, iter, primal_val, change_in_x, change_in_y))
+                                  %(elapsed_time, iter, primal_val,
+                                        change_in_x, change_in_y))
                     elif h_present is True and h_takes_infinite_values is True:
                         print("%.5f \t %d \t %+.5e \t %.5e \t %.5e \t %.5e"
-                                  %(elapsed_time, iter, primal_val, infeas, change_in_x, change_in_y))
+                                  %(elapsed_time, iter, primal_val, infeas,
+                                        change_in_x, change_in_y))
                     else:  # h_present is False
                         print("%.5f \t %d \t %+.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, change_in_x))
-                elif print_style == 'smoothed_gap':
+                elif print_style == 'smoothed_gap' or tolerance > 0:
+                    # When we print, we check
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
                         for j in range(len(pb.h)):
@@ -562,17 +596,57 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                         beta_print = 0
 
                     smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
-                                        rf, rhx, prox_y,
+                                        rf, rhx, prox_y, z, AfTz,
                                         buff_x, buff_y, buff,
                                         &beta_print, &gamma_print)
-                    
-                    print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
+
+                    if print_style == 'smoothed_gap' and print_time == True:
+                        print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
                               %(elapsed_time, iter, primal_val, infeas,
                                 smoothed_gap, beta_print, gamma_print,
                                 change_in_x, change_in_y))
+                    if smoothed_gap < tolerance and beta_print < tolerance \
+                           and gamma_print < tolerance:
+                        print("Target tolerance reached: stopping "
+                                  "the algorithm at smoothed_gap=%.5e, "
+                                  "beta=%.5e, gamma=%.5e"
+                                  %(smoothed_gap, beta_print, gamma_print))
+                        break
+                iter_last_check = iter
 
-                nb_prints += 1
+        if screening == 'gapsafe' and iter == iter_last_check:
+            # AfTz was computed just before when checking tolerance or printing
+            n_active = do_gap_safe_screening(active_set, n_active,
+                              pb, f, g, h, Lf,
+                              x, rf, rhx, prox_y, z, AfTz,
+                              xe, xc, rfe, rfc, buff_x, buff_y, buff,
+                              g_norms_Af, norms_Af, max_Lf, accelerated)
+        if sampling_law == 1 and g_present is True:
+            n_focus = update_focus_set(focus_set, n_active, active_set,
+                                           g, pb, x, buff_x, buff)
 
+        if accelerated is True and restart_period > 0:
+            do_restart, next_period = variable_restart(restart_history,
+                                        iter - offset, restart_period, next_period)
+            if do_restart is True:
+                xe = np.array(xe) + c_theta * np.array(xc)
+                rfe = np.array(rfe) + c_theta * np.array(rfc)
+                xc = np.zeros(x.shape[0])
+                rfc = np.zeros(rf.shape[0])
+                if h_present is True:
+                    rhxe = np.array(rhxe) + c_theta * np.array(rhxc)
+                    rhxc = np.zeros(rhx.shape[0])
+                    y_center = np.array(prox_y).copy()  # heuristic
+                if sampling_law == 1:
+                    theta0 = 0.5 / n_active
+                else:
+                    theta0 = 1. / n_active
+                theta = theta0
+                beta = beta0
+                c_theta = 1.
+                offset = iter
+
+                
         if elapsed_time > max_time:
             print("Time limit reached: stopping the algorithm after %f s"
                       %elapsed_time)
@@ -582,6 +656,10 @@ def coordinate_descent(pb, max_iter=1000, max_time=1000.,
                       "stopping the algorithm" %change_in_x)
             break
 
+    pb.performance_stats = {"Time (s)": elapsed_time, "Iterations": iter,
+                                "Smoothed Gap": [smoothed_gap, beta_print, gamma_print],
+                                "Change in x": change_in_x, "Change_in_y": change_in_x,
+                                "Primal value": primal_val, "Infeasibility": infeas}
     pb.sol = np.array(x).copy()
     if accelerated is False:
         pb.dual_sol = np.array(Sy).copy()

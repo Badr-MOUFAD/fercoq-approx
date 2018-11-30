@@ -1,4 +1,3 @@
-
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 
 import numpy as np
@@ -29,7 +28,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [8, 10, 11, 12, 13]
+probs = [1]
 
 for prob in probs:
     if prob == 0:
@@ -54,7 +53,6 @@ for prob in probs:
 
     if prob == 1:
         # Lasso
-        print("Lasso on Leukemia")
         pb_leukemia_lasso = cd_solver.Problem(N=X.shape[1],
                                               f=["square"] * X.shape[0],
                                               Af=X,
@@ -64,19 +62,30 @@ for prob in probs:
                                               cg=[0.1*np.linalg.norm(X.T.dot(y), np.inf)] * X.shape[1])
 
         pb_leukemia_lasso_acc = copy.copy(pb_leukemia_lasso)
+        pb_leukemia_lasso_screen = copy.copy(pb_leukemia_lasso)
         
-        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=100, verbose=1, print_style='smoothed_gap')
+        
+        print("Lasso on Leukemia")
+        cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=1000,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-10)
 
-        print("Lasso on Leukemia with momentum and variable restart")
-        cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=100, verbose=1, print_style='smoothed_gap', accelerated=True, restart_period=4)
-
+        print("Lasso on Leukemia with screening")
+        cd_solver.coordinate_descent(pb_leukemia_lasso_screen, max_iter=1000,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-10,
+                    screening='gapsafe')
+        
+        print("Lasso on Leukemia with screening, momentum and variable restart")
+        cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=1000,
+                    verbose=1., print_style='smoothed_gap', tolerance=1e-10,
+                    accelerated=True, restart_period=4, screening='gapsafe')
+        
     if prob == 2:
         # Logistic regression
         print("logistic regression on Leukemia")
         pb_leukemia_logreg = cd_solver.Problem(N=X.shape[1],
                                                f=["log1pexp"] * X.shape[0],
                                                Af=(X.T.multiply(y)).T,
-                                               bf=y,
+                                               bf=0*y,
                                                cf=[1] * X.shape[0],
                                                g=["square"] * X.shape[1],
                                                cg=[0.5*0.01*np.linalg.norm(X.T.dot(y), np.inf)] * X.shape[1])
@@ -94,7 +103,14 @@ for prob in probs:
                                             cf=[0.5/alpha] * X.shape[1] + [1] * X.shape[0],
                                             g=["box_zero_one"] * X.shape[0])
 
-        cd_solver.coordinate_descent(pb_leukemia_svm, max_iter=100, verbose=0.5, print_style='smoothed_gap')
+        
+        pb_leukemia_svm_screen = copy.copy(pb_leukemia_svm)
+        
+        cd_solver.coordinate_descent(pb_leukemia_svm, max_iter=1000, verbose=0.5, print_style='smoothed_gap', tolerance=1e-14)
+        print("dual SVM on Leukemia with gap safe screening")
+
+        cd_solver.coordinate_descent(pb_leukemia_svm_screen, max_iter=1000, verbose=0.5, print_style='smoothed_gap', screening='gapsafe', tolerance=1e-14)
+
 
     if prob == 4:
         # Lasso by ISTA
@@ -270,7 +286,7 @@ for prob in probs:
         except:
             print('fMRI dataset not loaded')
     if prob == 10:
-        # LP  --  min c.dot(x) : Mx <= b
+        # LP  --  min c.dot(x) : x >= 0, Mx <= b
         print('basic LP')
         d = 3
         n = 4
@@ -336,7 +352,7 @@ for prob in probs:
         pb_iris_multinomial = cd_solver.Problem(N=N,
                 f=f,
                 Af=Af,
-                bf=np.concatenate((Y,[0])),
+                bf=np.zeros(Af.shape[0]),
                 cf=[1.]*len(f),
                 blocks_f=blocks_f,
                 g=["norm2"]*n_features,

@@ -7,9 +7,9 @@ import os
 from os.path import join
 import numpy
 import warnings
+from numpy.distutils.misc_util import Configuration
 
 def configuration():
-    from numpy.distutils.misc_util import Configuration
 
     config = Configuration('')
     
@@ -22,11 +22,13 @@ def configuration():
     config.add_extension(name='algorithms',
                          sources=['algorithms.cpp'])
     
+    config.add_extension(name='screening',
+                         sources=['screening.cpp'])
+    
     config.add_extension(name='cd_solver',
                          sources=['cd_solver.cpp'])
         
     return config
 
 if __name__ == '__main__':
-    from numpy.distutils.core import setup
     setup( **configuration().todict() )
