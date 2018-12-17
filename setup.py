@@ -1,34 +1,57 @@
-# cython --cplus -X boundscheck=False -X cdivision=True *.pyx
-# python setup.py build_ext --inplace
-
-from distutils.core import setup
-from distutils.core import Extension
 import os
-from os.path import join
-import numpy
-import warnings
-from numpy.distutils.misc_util import Configuration
 
-def configuration():
+import numpy as np
 
-    config = Configuration('')
-    
-    config.add_extension(name='atoms',
-                         sources=['atoms.cpp'])
-    
-    config.add_extension(name='helpers',
-                         sources=['helpers.cpp'])
-    
-    config.add_extension(name='algorithms',
-                         sources=['algorithms.cpp'])
-    
-    config.add_extension(name='screening',
-                         sources=['screening.cpp'])
-    
-    config.add_extension(name='cd_solver',
-                         sources=['cd_solver.cpp'])
-        
-    return config
+from distutils.core import setup, Extension
+from Cython.Distutils import build_ext
 
-if __name__ == '__main__':
-    setup( **configuration().todict() )
+
+descr = 'Efficient implementation of a generic CD solver'
+
+
+DISTNAME = 'cd_solver'
+DESCRIPTION = descr
+MAINTAINER = 'Olivier Fercoq'
+MAINTAINER_EMAIL = 'olivier.fercoq@telecom-paristech.fr'
+LICENSE = 'Apache License, Version 2.0'
+DOWNLOAD_URL = 'https://bitbucket.org/ofercoq/cd_solver.git'
+URL = 'https://bitbucket.org/ofercoq/cd_solver/src'
+
+
+setup(name='cd_solver',
+      description=DESCRIPTION,
+      long_description=open('README').read(),
+      license=LICENSE,
+      maintainer=MAINTAINER,
+      maintainer_email=MAINTAINER_EMAIL,
+      url=URL,
+      download_url=DOWNLOAD_URL,
+      cmdclass={'build_ext': build_ext},
+      ext_modules=[
+          Extension('atoms',
+                    sources=['atoms.pyx'],
+                    language='c++',
+                    include_dirs=[np.get_include()],
+                    extra_compile_args=["-O3"]),
+          Extension('helpers',
+                    sources=['helpers.pyx'],
+                    language='c++',
+                    include_dirs=[np.get_include()],
+                    extra_compile_args=["-O3"]),
+          Extension('algorithms',
+                    sources=['algorithms.pyx'],
+                    language='c++',
+                    include_dirs=[np.get_include()],
+                    extra_compile_args=["-O3"]),
+          Extension('screening',
+                    sources=['screening.pyx'],
+                    language='c++',
+                    include_dirs=[np.get_include()],
+                    extra_compile_args=["-O3"]),
+          Extension('cd_solver',
+                    sources=['cd_solver.pyx'],
+                    language='c++',
+                    include_dirs=[np.get_include()],
+                    extra_compile_args=["-O3"]),
+                 ],
+    )
