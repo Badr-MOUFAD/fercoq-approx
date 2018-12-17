@@ -2,8 +2,8 @@ import os
 
 import numpy as np
 
-from distutils.core import setup, Extension
-from Cython.Distutils import build_ext
+from distutils.core import setup
+from Cython.Distutils import build_ext, Extension
 
 
 descr = 'Efficient implementation of a generic CD solver'
@@ -32,26 +32,41 @@ setup(name='cd_solver',
                     sources=['atoms.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
+                    cython_directives={'boundscheck':False,
+                                             'cdivision':True,
+                                             'wraparound':False},
                     extra_compile_args=["-O3"]),
           Extension('helpers',
                     sources=['helpers.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
+                    cython_directives={'boundscheck':False,
+                                             'cdivision':True,
+                                             'wraparound':False},
                     extra_compile_args=["-O3"]),
           Extension('algorithms',
                     sources=['algorithms.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
+                    cython_directives={'boundscheck':False,
+                                             'cdivision':True,
+                                             'wraparound':False},
                     extra_compile_args=["-O3"]),
           Extension('screening',
                     sources=['screening.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
+                    cython_directives={'boundscheck':False,
+                                             'cdivision':True,
+                                             'wraparound':False},
                     extra_compile_args=["-O3"]),
           Extension('cd_solver',
                     sources=['cd_solver.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
+                    cython_directives={'boundscheck':False,
+                                             'cdivision':True,
+                                             'wraparound':True},
                     extra_compile_args=["-O3"]),
                  ],
     )

@@ -29,7 +29,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [7, 8, 10, 11, 12, 13]
+probs = [1]
 
 for prob in probs:
     if prob == 0:
