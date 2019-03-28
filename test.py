@@ -29,7 +29,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [1]
+probs = [6]
 
 for prob in probs:
     if prob == 0:
@@ -165,14 +165,35 @@ for prob in probs:
 
         cd_solver.coordinate_descent(pb_leukemia_svm_intercept, max_iter=10000, verbose=0.5, print_style='smoothed_gap')
 
+        print("dual SVM with intercept on Leukemia, no Cholesky")
+        Q = 1. / alpha * (X.T.multiply(y)).T.dot(X.T.multiply(y))
+        pb_leukemia_svm_intercept_nochol = cd_solver.Problem(N=X.shape[0],
+                                            Q=Q,
+                                            f=["linear"],
+                                            Af=-np.ones((1,X.shape[0])),
+                                            bf=np.zeros(1),
+                                            cf=[1],
+                                            g=["box_zero_one"] * X.shape[0],
+                                            h=["eq_const"],
+                                            Ah=sp.csc_matrix(y)
+                                                          )
+
+        pb_leukemia_svm_intercept_nochol_smart_cd = copy.copy(pb_leukemia_svm_intercept_nochol)
+
+        cd_solver.coordinate_descent(pb_leukemia_svm_intercept_nochol, max_iter=10000, verbose=0.5, print_style='smoothed_gap')
+
+        cd_solver.coordinate_descent(pb_leukemia_svm_intercept_nochol, max_iter=10000, verbose=0.5, print_style='smoothed_gap', accelerated=True, restart_period=10)
+
     if prob == 7:
         print("dual SVM with intercept on RCV1")
 
-        data = svmlight_format.load_svmlight_file('/home/ofercoq/scikit_learn_data/mldata/rcv1_train.binary')
-        # data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+        # data = svmlight_format.load_svmlight_file('/home/ofercoq/scikit_learn_data/mldata/rcv1_train.binary')
+        data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
 
-        X = data[0].astype(np.float)
-        y = data[1].astype(np.float).ravel()
+        #X = data[0].astype(np.float)
+        #y = data[1].astype(np.float).ravel()
+        X = data['X']
+        y = data['y'].astype(np.float).ravel()
         
         C = 1. / X.shape[0]
         alpha = 0.25 / X.shape[0]

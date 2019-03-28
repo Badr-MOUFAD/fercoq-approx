@@ -43,6 +43,7 @@ def find_dual_variables_to_update(UINT32_t n,
 cdef void one_step_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] Sy, DOUBLE[:] prox_y,
         DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_ii,
+        DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
         DOUBLE[:] grad,
         UINT32_t[:] blocks, UINT32_t[:] blocks_f, UINT32_t[:] blocks_h,
@@ -54,6 +55,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
+        UINT32_t[:] Q_indptr, UINT32_t[:] Q_indices, DOUBLE[:] Q_data,
         atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
@@ -127,6 +129,9 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
             coord = blocks[ii] + i
             x_ii[i] = x[coord]
 
+            # Compute gradient of quadratic form and do gradient step
+            x[coord] -= primal_step_size[ii] * rQ[coord]
+
             # Compute gradient of f and do gradient step
             if f_present is True:
                 grad[i] = 0.
@@ -167,6 +172,9 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
             coord = blocks[ii] + i
             if x_ii[i] != x[coord]:
                 dxi = x[coord] - x_ii[i]
+                for l in range(Q_indptr[coord], Q_indptr[coord+1]):
+                    j = Q_indices[l]
+                    rQ[j] += Q_data[l] * dxi
                 if f_present is True:
                     for l in range(Af_indptr[coord], Af_indptr[coord+1]):
                         j = Af_indices[l]
@@ -223,7 +231,8 @@ cdef DOUBLE next_theta(DOUBLE theta, int h_present=0) nogil:
 cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] y_center, DOUBLE[:] prox_y,
         DOUBLE[:] rhxe, DOUBLE[:] rhxc, DOUBLE[:] rfe, DOUBLE[:] rfc,
-        DOUBLE[:] rhy, DOUBLE* theta, DOUBLE theta0, DOUBLE* c_theta,
+        DOUBLE[:] rhy, DOUBLE[:] rQe, DOUBLE[:] rQc,
+        DOUBLE* theta, DOUBLE theta0, DOUBLE* c_theta,
         DOUBLE* beta,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] xe_ii,
         DOUBLE[:] xc_ii, DOUBLE[:] grad,
@@ -236,6 +245,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
+        UINT32_t[:] Q_indptr, UINT32_t[:] Q_indices, DOUBLE[:] Q_data,
         atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah, 
@@ -312,6 +322,10 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
             coord = blocks[ii] + i
             xe_ii[i] = xe[coord]
             xc_ii[i] = xc[coord]
+            
+            # Compute gradient of quadratic form and do gradient step
+            xe[coord] -= primal_step_size * theta0 / theta[0] * \
+              (rQe[coord] + c_theta[0] * rQc[coord])
 
             # Compute gradient of f and do gradient step
             if f_present is True:
@@ -352,6 +366,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                 coord = blocks[ii] + i
                 xe[coord] = (buff[i] + bg[coord])/ Dg_data[ii]
 
+        # Update xc variable
         for i in range(nb_coord):
             coord = blocks[ii] + i
             xc[coord] -= (xe[coord] - xe_ii[i]) * \
@@ -363,6 +378,10 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
             if xe_ii[i] != xe[coord]:
                 dxei = xe[coord] - xe_ii[i]
                 dxci = xc[coord] - xc_ii[i]
+                for l in range(Q_indptr[coord], Q_indptr[coord+1]):
+                    j = Q_indices[l]
+                    rQe[j] += Q_data[j] * dxei
+                    rQc[j] += Q_data[j] * dxci
                 if f_present is True:
                     for l in range(Af_indptr[coord], Af_indptr[coord+1]):
                         j = Af_indices[l]

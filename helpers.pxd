@@ -8,11 +8,14 @@ import sys
 
 cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+			     DOUBLE[:] rQ,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* val, DOUBLE* infeas)
 
 cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+			     DOUBLE[:] rQ,
 			     DOUBLE[:] Sy, DOUBLE[:] z, DOUBLE[:] AfTz,
+			     DOUBLE[:] w_,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* beta, DOUBLE* gamma, compute_z=*)

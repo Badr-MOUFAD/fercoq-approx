@@ -3,7 +3,6 @@
 
 from atoms cimport *
 # bonus: same imports as in atoms
-from screening cimport do_gap_safe_screening, update_focus_set
 
 
 cdef enum:
@@ -15,6 +14,7 @@ cdef enum:
 cdef void one_step_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] Sy, DOUBLE[:] prox_y,
         DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_ii,
+	DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
         DOUBLE[:] grad,
         UINT32_t[:] blocks, UINT32_t[:] blocks_f, UINT32_t[:] blocks_h,
@@ -26,6 +26,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
+        UINT32_t[:] Q_indptr, UINT32_t[:] Q_indices, DOUBLE[:] Q_data,
         atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
@@ -38,7 +39,8 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
 cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] y_center, DOUBLE[:] prox_y,
         DOUBLE[:] rhxe, DOUBLE[:] rhxc, DOUBLE[:] rfe, DOUBLE[:] rfc,
-        DOUBLE[:] rhy, DOUBLE* theta, DOUBLE theta0, DOUBLE* c_theta,
+        DOUBLE[:] rhy, DOUBLE[:] rQe, DOUBLE[:] rQc,
+	DOUBLE* theta, DOUBLE theta0, DOUBLE* c_theta,
         DOUBLE* beta,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] xe_ii,
         DOUBLE[:] xc_ii, DOUBLE[:] grad,
@@ -51,6 +53,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
         UINT32_t[:] Ah_col_indices, UINT32_t[:,:] dual_vars_to_update,
         DOUBLE[:] ch, DOUBLE[:] bh,
+        UINT32_t[:] Q_indptr, UINT32_t[:] Q_indices, DOUBLE[:] Q_data,
         atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] Lf, DOUBLE[:] norm2_columns_Ah,

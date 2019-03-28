@@ -9,11 +9,15 @@ cdef DOUBLE INF = 1e20
 
 cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+                             DOUBLE[:] rQ,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* val, DOUBLE* infeas):
     cdef UINT32_t ii, i, j, jh, l, coord, nbcoord
     val[0] = 0.
     infeas[0] = 0.
+    for i in range(pb.N):
+        val[0] += 0.5 * x[i] * rQ[i]
+
     if pb.f_present is True:
         for j in range(len(pb.f)):
             val[0] += pb.cf[j] * f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]],
@@ -53,13 +57,22 @@ cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
 
 cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+                             DOUBLE[:] rQ,
                              DOUBLE[:] Sy, DOUBLE[:] z, DOUBLE[:] AfTz,
+                             DOUBLE[:] w_,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* beta, DOUBLE* gamma, compute_z=True):
     # We output z and AfTz because it is useful when doing variable screening
     cdef UINT32_t ii, i, j, jh, l, coord, nbcoord
     cdef DOUBLE val = 0.
+
+    cdef DOUBLE[:] w
+    
     if compute_z is True:
+        # w is the dual variable associated to 0.5 xT Q x
+        w = rQ
+        val += np.array(x).dot(np.array(w))
+
         # z is the dual variable associated to f(Af x - bf)
         if pb.f_present is True:
             for j in range(len(pb.f)):
@@ -76,6 +89,13 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                 AfTz[i] = AfTz_[i]  # otherwise the pointer seems to be broken
         # else: AfTz is initialized with np.zeros(pb.N)
     else:
+        w = w_
+        max_w = np.norm(np.array(w), np.inf)
+        max_rQ = np.norm(np.array(rQ), np.inf)
+        if max_w > 0:
+            # we add 0.5 (x Q x + w inv(Q) w), knowing that Q x = rQ and w = rQ/scaling
+            val += 0.5 * np.array(x).dot(np.array(rQ))
+            val += 0.5 * np.array(x).dot(np.array(w)) * max_w / max_rQ
         if pb.f_present is True:
             for j in range(len(pb.f)):
                 val += pb.cf[j] * f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
@@ -88,7 +108,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                      pb.blocks_f[j+1]-pb.blocks_f[j], VAL_CONJ,
                      useless_param, useless_param)
             val += pb.bf.dot(np.array(z))
-            
+
     if pb.h_present is True:
         AhTSy = pb.Ah.T.dot(np.array(Sy))
     else:
@@ -123,7 +143,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                 dual_infeas += fabs(buff[i] - buff_x[i])
 
         gamma[0] = max(1./INF, dual_infeas)
-        # compute g*_gamma(-AfTz - AhTSy;x) = -(AfTz + AhTSy)(xbar) - g(xbar) - gamma/2 ||x-xbar||**2
+        # compute g*_gamma(-AfTz - AhTSy - w;x) = -(AfTz + AhTSy + w)(xbar) - g(xbar) - gamma/2 ||x-xbar||**2
         val_g1 = 0.
         val_g2 = 0.
         val_g3 = 0.
@@ -134,7 +154,8 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
                 buff_x[i] = pb.Dg.data[0][ii] * (
-                    x[coord] - 1. / gamma[0] * (AfTz[coord] + AhTSy[coord])) - pb.bg[coord]
+                    x[coord] - 1. / gamma[0] * \
+                       (AfTz[coord] + AhTSy[coord] + w[coord])) - pb.bg[coord]
             g[ii](buff_x, buff, nb_coord, PROX,
                   pb.cg[ii]*pb.Dg.data[0][ii]**2/gamma[0], useless_param)
             for i in range(nb_coord):
@@ -149,7 +170,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                                         useless_param, useless_param)
             for i in range(nb_coord):
                 coord = pb.blocks[ii] + i
-                val_g2 -= (AfTz[coord] + AhTSy[coord]) * xbar[coord]
+                val_g2 -= (AfTz[coord] + AhTSy[coord] + w[coord]) * xbar[coord]
                 val_g3 -= gamma[0] / 2. * (xbar[coord] - x[coord])**2
         val += val_g + val_g1 + val_g2 + val_g3
         # print('contrib_g=', val_g + val_g1 + val_g2 + val_g3, val_g, val_g1, val_g2, val_g3)

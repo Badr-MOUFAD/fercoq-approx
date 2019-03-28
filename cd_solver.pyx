@@ -10,6 +10,7 @@ from libc.stdlib cimport malloc, free
 import numpy as np
 from scipy import linalg
 from scipy import sparse
+from scipy.sparse import linalg as spl
 import warnings
 import time
 import sys
@@ -34,7 +35,8 @@ class Problem:
                          f=None, cf=None, Af=None, bf=None, blocks_f=None,
                          g=None, cg=None, Dg=None, bg=None,
                          h=None, ch=None, Ah=None, bh=None, blocks_h=None,
-                         h_takes_infinite_values=None):
+                         h_takes_infinite_values=None,
+                         Q=None):
             # N is the number of variables
             # blocks codes all blocks. It starts with 0 and terminates with N.
             # The default is N block of size 1.
@@ -134,6 +136,12 @@ class Problem:
                 blocks_h = np.arange(len(h)+1, dtype=np.uint32)
             if len(blocks_h) != len(h) + 1 or blocks_h[-1] != Ah.shape[0]:
                     raise Warning("blocks_h seems to be ill defined.")
+            if Q is None:
+                Q = sparse.csc_matrix((N, N))  # 0 matrix
+            else:
+                Q = sparse.csc_matrix(Q)
+                if Q.shape[0] != Q.shape[1] or Q.shape[0] != N:
+                    raise Warning("Q should be a square N x N matrix.")
 
             self.f = f
             self.cf = np.array(cf, dtype=float)
@@ -153,6 +161,7 @@ class Problem:
                   y_init = np.zeros(self.Ah.shape[0])
             self.y_init = y_init
             self.h_takes_infinite_values = h_takes_infinite_values
+            self.Q = Q
 
 
 
@@ -210,8 +219,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef UINT32_t[:] Ah_indices = np.array(pb.Ah.indices, dtype=np.uint32)  # I do not know why but the order of the indices is changed here...
     cdef DOUBLE[:] Ah_data = np.array(pb.Ah.data, dtype=float)  # Fortunately, it seems that the same thing happens here.
     cdef UINT32_t[:] Ah_nnz_perrow = np.array((pb.Ah!=0).sum(axis=1), dtype=np.uint32).ravel()
-    
     cdef DOUBLE[:] bh = pb.bh
+    cdef UINT32_t[:] Q_indptr = np.array(pb.Q.indptr, dtype=np.uint32)
+    cdef UINT32_t[:] Q_indices = np.array(pb.Q.indices, dtype=np.uint32)
+    cdef DOUBLE[:] Q_data = np.array(pb.Q.data, dtype=float)
 
     cdef int f_present = pb.f_present
     cdef atom* f
@@ -318,6 +329,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             for l in range(Ah_indptr[i], Ah_indptr[i+1]):
                 Sy[Ah_indices[l]] += y[l] / Ah_nnz_perrow[Ah_indices[l]]
                 rhy[i] += Ah_data[l] * y[l]
+    cdef DOUBLE[:] rQ = pb.Q.dot(x)
 
     # Arrays for accelerated version
     cdef DOUBLE[:] xe
@@ -326,6 +338,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] rfc
     cdef DOUBLE[:] rhxe
     cdef DOUBLE[:] rhxc
+    cdef DOUBLE[:] rQe
+    cdef DOUBLE[:] rQc
     if accelerated == True:
         xe = x.copy()
         xc = np.zeros(x.shape[0])
@@ -333,6 +347,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         rfc = np.zeros(rf.shape[0])
         rhxe = np.array(rhx).copy()
         rhxc = np.zeros(rhx.shape[0])
+        rQe = np.array(rQ).copy()
+        rQc = np.zeros(rQ.shape[0])
     else:
         xe = np.empty(0)
         xc = np.empty(0)
@@ -340,6 +356,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         rfc = np.empty(0)
         rhxe = np.empty(0)
         rhxc = np.empty(0)
+        rQe = np.empty(0)
+        rQc = np.empty(0)
 
     cdef DOUBLE theta0 = 1. / n
     cdef DOUBLE theta = theta0
@@ -371,12 +389,13 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
     # Compute Lipschitz constants
     cdef DOUBLE[:] tmp_Lf = np.zeros(len(pb.f))
-    cdef DOUBLE max_Lf = 0.
+    svdsQ1 = spl.svds(pb.Q, 1)
+    cdef DOUBLE max_Lf = svdsQ1[1][0]  # Largest eigenvalue of Q
     for j in range(len(pb.f)):
         tmp_Lf[j] = cf[j] * f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
                          LIPSCHITZ, useless_param, useless_param)
         max_Lf = fmax(max_Lf, tmp_Lf[j])
-    cdef DOUBLE[:] Lf = 1e-30 * np.ones(n)
+    cdef DOUBLE[:] Lf = pb.Q.diagonal() + 1e-30 * np.ones(N)
     if f_present is True:
         for ii in range(n):
             # if block size is > 1, we use the inequality frobenius norm > 2-norm
@@ -496,7 +515,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
         if accelerated == False:
             one_step_coordinate_descent(x,
-                    y, Sy, prox_y, rhx, rf, rhy, rhy_ii,
+                    y, Sy, prox_y, rhx, rf, rhy, rhy_ii, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
                     Af_indptr, Af_indices, Af_data, cf, bf,
@@ -506,6 +525,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     inv_blocks_h, Ah_nnz_perrow, Ah_col_indices,
                     dual_vars_to_update,
                     ch, bh,
+                    Q_indptr, Q_indices, Q_data,
                     f, g, h, f_present, g_present, h_present,
                     primal_step_size, dual_step_size,
                     sampling_law, rand_r_state, active_set, n_active,
@@ -514,13 +534,14 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         else:
             one_step_accelerated_coordinate_descent(x,
                     xe, xc, y_center, prox_y, rhxe, rhxc, rfe, rfc,
-                    rhy, &theta, theta0, &c_theta, &beta,
+                    rhy, rQe, rQc, &theta, theta0, &c_theta, &beta,
                     buff_x, buff_y, buff, xe_ii, xc_ii, grad,
                     blocks, blocks_f, blocks_h,
                     Af_indptr, Af_indices, Af_data, cf, bf,
                     Dg_data, cg, bg, Ah_indptr, Ah_indices, Ah_data,
                     inv_blocks_f, inv_blocks_h, Ah_nnz_perrow,
                     Ah_col_indices, dual_vars_to_update, ch, bh,
+                    Q_indptr, Q_indices, Q_data,
                     f, g, h, f_present, g_present, h_present,
                     Lf, norm2_columns_Ah, 
                     sampling_law, rand_r_state, active_set, n_active,
@@ -553,7 +574,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         for l in range(pb.Ah.shape[0]):
                             rhx[l] = rhxe[l] + c_theta * rhxc[l]
                             
-                compute_primal_value(pb, f, g, h, x, rf, rhx,
+                compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
                                          buff_x, buff_y, buff,
                                          &primal_val, &infeas)
                 if print_style == 'classical' and print_time == True:
@@ -595,7 +616,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         beta_print = 0
 
                     smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
-                                        rf, rhx, prox_y, z, AfTz,
+                                        rf, rhx, rQ, prox_y, z, AfTz, rQ,
                                         buff_x, buff_y, buff,
                                         &beta_print, &gamma_print)
 
@@ -617,8 +638,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             # AfTz was computed just before when checking tolerance or printing
             n_active = do_gap_safe_screening(active_set, n_active,
                               pb, f, g, h, Lf,
-                              x, rf, rhx, prox_y, z, AfTz,
-                              xe, xc, rfe, rfc, buff_x, buff_y, buff,
+                              x, rf, rhx, rQ, prox_y, z, AfTz,
+                              xe, xc, rfe, rfc, rQe, rQc, buff_x, buff_y, buff,
                               g_norms_Af, norms_Af, max_Lf, accelerated)
         if sampling_law == 1 and g_present is True:
             n_focus = update_focus_set(focus_set, n_active, active_set,
