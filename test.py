@@ -29,7 +29,7 @@ print('logsumexp', test[0])
 
 
 
-probs = [7, 8, 10, 11, 12, 13]
+probs = [6]
 
 for prob in probs:
     if prob == 0:
@@ -164,6 +164,25 @@ for prob in probs:
                                                           )
 
         cd_solver.coordinate_descent(pb_leukemia_svm_intercept, max_iter=10000, verbose=0.5, print_style='smoothed_gap')
+
+        print("dual SVM with intercept on Leukemia, no Cholesky")
+        Q = 1. / alpha * (X.T.multiply(y)).T.dot(X.T.multiply(y))
+        pb_leukemia_svm_intercept_nochol = cd_solver.Problem(N=X.shape[0],
+                                            Q=Q,
+                                            f=["linear"],
+                                            Af=-np.ones((1,X.shape[0])),
+                                            bf=np.zeros(1),
+                                            cf=[1],
+                                            g=["box_zero_one"] * X.shape[0],
+                                            h=["eq_const"],
+                                            Ah=sp.csc_matrix(y)
+                                                          )
+
+        pb_leukemia_svm_intercept_nochol_smart_cd = copy.copy(pb_leukemia_svm_intercept_nochol)
+
+        cd_solver.coordinate_descent(pb_leukemia_svm_intercept_nochol, max_iter=10000, verbose=0.5, print_style='smoothed_gap')
+
+        cd_solver.coordinate_descent(pb_leukemia_svm_intercept_nochol, max_iter=10000, verbose=0.5, print_style='smoothed_gap', accelerated=True, restart_period=10)
 
     if prob == 7:
         print("dual SVM with intercept on RCV1")

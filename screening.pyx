@@ -140,17 +140,21 @@ cdef DOUBLE polar_support_dual_domain(atom func, DOUBLE[:] x,
     return -1.
 
 
-cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set, UINT32_t n_active_prev, pb,
+cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
+                              UINT32_t n_active_prev, pb,
                               atom* f, atom* g, atom* h, DOUBLE[:] Lf,
-                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx, DOUBLE[:] prox_y,
+                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+                              DOUBLE[:] rQ, DOUBLE[:] prox_y,
                               DOUBLE[:] z, DOUBLE[:] AfTz,
-                              DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] rfe, DOUBLE[:] rfc,
+                              DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] rfe,
+                              DOUBLE[:] rfc, DOUBLE[:] rQe, DOUBLE[:] rQc,
                               DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                               g_norms_Af, norms_Af, DOUBLE max_Lf, int accelerated):
     cdef UINT32_t i, ii, iii, l, j, kink_number, coord, nb_coord
     cdef UINT32_t n_active = n_active_prev
     cdef DOUBLE beta = 0.
     cdef DOUBLE gamma = 0.
+    cdef DOUBLE[:] w = np.array(rQ).copy()
 
     cdef DOUBLE scaling = 1.
     for iii in range(n_active):
@@ -158,17 +162,18 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set, UINT32_t n_active_pr
         nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
         for i in range(nb_coord):
             coord = pb.blocks[ii] + i
-            buff_x[i] = pb.Dg.data[0][ii] * AfTz[coord] - pb.bg[coord]
+            buff_x[i] = pb.Dg.data[0][ii] * (AfTz[coord] + w[coord]) - pb.bg[coord]
         norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
                            / (pb.cg[ii] * pb.Dg.data[0][ii])
         scaling = fmax(scaling, norm_dom_g_i)
 
     z = np.array(z) / scaling
     AfTz = np.array(AfTz) / scaling
-        
+    w = np.array(w) / scaling
+
     # Scale dual vector and compute duality gap
     gap = compute_smoothed_gap(pb, f, g, h, x,
-                                   rf, rhx, prox_y, z, AfTz,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w,
                                    buff_x, buff_y, buff,
                                    &beta, &gamma, compute_z=False)
 
@@ -183,7 +188,7 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set, UINT32_t n_active_pr
         nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
         for i in range(nb_coord):
             coord = pb.blocks[ii] + i
-            buff_x[i] = pb.Dg.data[0][ii] * AfTz[coord] - pb.bg[coord]
+            buff_x[i] = pb.Dg.data[0][ii] * (AfTz[coord] + w[coord]) - pb.bg[coord]
         kink_number = 0
         while True:
             polar_support_value = polar_support_kink(g[ii], buff_x,
@@ -202,19 +207,28 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set, UINT32_t n_active_pr
                         coord = pb.blocks[ii] + i
                         buff[i] = (buff[i] + pb.bg[coord]) / pb.Dg.data[0][ii]
                         dxi = buff[i] - x[coord]
-                        if pb.f_present == True and dxi != 0:
-                            for l in range(pb.Af.indptr[coord], pb.Af.indptr[coord+1]):
-                                j = pb.Af.indices[l]
-                                rf[j] += pb.Af.data[l] * dxi
+                        if dxi != 0:
+                            for l in range(pb.Q.indptr[coord], pb.Q.indptr[coord+1]):
+                                j = pb.Q.indices[l]
+                                rQ[j] += pb.Q.data[l] * dxi
+                            if pb.f_present == True:
+                                for l in range(pb.Af.indptr[coord], pb.Af.indptr[coord+1]):
+                                    j = pb.Af.indices[l]
+                                    rf[j] += pb.Af.data[l] * dxi
                         x[coord] = buff[i]
                         if accelerated == True:
                             dxei = buff[i] - xe[coord]
                             dxci = - xc[coord]
-                            if pb.f_present == True and dxei != 0 and dxci != 0:
-                                for l in range(pb.Af.indptr[coord], pb.Af.indptr[coord+1]):
-                                    j = pb.Af.indices[l]
-                                    rfe[j] += pb.Af.data[l] * dxei
-                                    rfc[j] += pb.Af.data[l] * dxci
+                            if dxei != 0 and dxci != 0:
+                                for l in range(pb.Q.indptr[coord], pb.Q.indptr[coord+1]):
+                                    j = pb.Q.indices[l]
+                                    rQe[j] += pb.Q.data[l] * dxei
+                                    rQc[j] += pb.Q.data[l] * dxci
+                                if pb.f_present == True:
+                                    for l in range(pb.Af.indptr[coord], pb.Af.indptr[coord+1]):
+                                        j = pb.Af.indices[l]
+                                        rfe[j] += pb.Af.data[l] * dxei
+                                        rfc[j] += pb.Af.data[l] * dxci
                             xe[coord] = buff[i]
                             xc[coord] = 0.
                     # remove variable ii from the active set

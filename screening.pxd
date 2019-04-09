@@ -10,11 +10,14 @@ cdef DOUBLE polar_matrix_norm(atom func, UINT32_t* Af_indptr,
                                   UINT32_t nb_coord, UINT32_t[:] Af_indices,
                                   DOUBLE[:] Af_data, UINT32_t kink_number)
 
-cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set, UINT32_t n_active_prev, pb,
+cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
+                              UINT32_t n_active_prev, pb,
                               atom* f, atom* g, atom* h, DOUBLE[:] Lf, 
-                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx, DOUBLE[:] prox_y,
+                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
+                              DOUBLE[:] rQ, DOUBLE[:] prox_y,
                               DOUBLE[:] z, DOUBLE[:] AfTz,
-                              DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] rfe, DOUBLE[:] rfc,
+                              DOUBLE[:] xe, DOUBLE[:] xc, DOUBLE[:] rfe,
+                              DOUBLE[:] rfc, DOUBLE[:] rQe, DOUBLE[:] rQc,
                               DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                               g_norms_Af, norms_Af, DOUBLE max_Lf, int accelerated)
 
