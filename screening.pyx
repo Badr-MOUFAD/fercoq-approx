@@ -34,10 +34,12 @@ cdef int is_in_domain_polar_support(atom func, DOUBLE[:] x,
 
 cdef DOUBLE polar_matrix_norm(atom func, UINT32_t* Af_indptr,
                                   UINT32_t nb_coord, UINT32_t[:] Af_indices,
-                                  DOUBLE[:] Af_data, UINT32_t kink_number):
+                                  DOUBLE[:] Af_data, DOUBLE Qii,
+                                  UINT32_t kink_number):
     # equivalent of matrix norm for polar support function of the
     #    subdifferential of g at kink points
     # Af: sparse sub-matrix corresponding to the atom
+    # Qii: nonzero if i-ith subblock of Q is nonzero
     cdef UINT32_t i, l
     cdef DOUBLE val = 0.
     cdef DOUBLE val_i
@@ -45,7 +47,10 @@ cdef DOUBLE polar_matrix_norm(atom func, UINT32_t* Af_indptr,
         if kink_number == 0:
             # val = np.max(np.sqrt(Af.multiply(Af).sum(axis=0)))
             for i in range(nb_coord):
-                val_i = 0.
+                if Qii > 0:
+                    val_i = 1
+                else:
+                    val_i = 0.
                 for l in range(Af_indptr[i], Af_indptr[i+1]):
                     val_i += Af_data[l] * Af_data[l]
                 val = fmax(val, val_i)
@@ -57,7 +62,10 @@ cdef DOUBLE polar_matrix_norm(atom func, UINT32_t* Af_indptr,
             # Frobenius norm is larger that spectral norm but easier to compute
             # val = sqrt(Af.multiply(Af).sum())
             for i in range(nb_coord):
-                val_i = 0.
+                if Qii > 0:
+                    val_i = nb_coord
+                else:
+                    val_i = 0.
                 for l in range(Af_indptr[i], Af_indptr[i+1]):
                     val_i += Af_data[l] * Af_data[l]
                 val += val_i
@@ -162,7 +170,7 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
         nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
         for i in range(nb_coord):
             coord = pb.blocks[ii] + i
-            buff_x[i] = pb.Dg.data[0][ii] * (AfTz[coord] + w[coord]) - pb.bg[coord]
+            buff_x[i] = AfTz[coord] + w[coord]
         norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
                            / (pb.cg[ii] * pb.Dg.data[0][ii])
         scaling = fmax(scaling, norm_dom_g_i)
@@ -188,7 +196,7 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
         nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
         for i in range(nb_coord):
             coord = pb.blocks[ii] + i
-            buff_x[i] = pb.Dg.data[0][ii] * (AfTz[coord] + w[coord]) - pb.bg[coord]
+            buff_x[i] = AfTz[coord] + w[coord]
         kink_number = 0
         while True:
             polar_support_value = polar_support_kink(g[ii], buff_x,

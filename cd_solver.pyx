@@ -1,4 +1,4 @@
-# Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
+## Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
 
 
@@ -395,7 +395,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         tmp_Lf[j] = cf[j] * f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
                          LIPSCHITZ, useless_param, useless_param)
         max_Lf = fmax(max_Lf, tmp_Lf[j])
-    cdef DOUBLE[:] Lf = pb.Q.diagonal() + 1e-30 * np.ones(N)
+    cdef DOUBLE[:] Lf = np.abs(pb.Q.diagonal()) + 1e-30 * np.ones(N)
     if f_present is True:
         for ii in range(n):
             # if block size is > 1, we use the inequality frobenius norm > 2-norm
@@ -450,13 +450,15 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             nb_coord = blocks[ii+1] - blocks[ii]
             k = 0
             l = Af_indptr[blocks[ii]]
+            Qii = np.linalg.norm(Q[blocks[ii]:blocks[ii+1]].data)
+            # for Q psd, Qii is zero if and only if the i-i subblock is zero.
             norms_Af[ii] = polar_matrix_norm(abs,
                             &Af_indptr[blocks[ii]], nb_coord,
-                            Af_indices, Af_data, 0)
+                            Af_indices, Af_data, Qii, 0)
             while True:
                 polar_support_value = polar_matrix_norm(g[ii],
                             &Af_indptr[blocks[ii]], nb_coord,
-                            Af_indices, Af_data, k)
+                            Af_indices, Af_data, Qii, k)
                 if polar_support_value == -1.:
                     # code for no more kinks
                     break
