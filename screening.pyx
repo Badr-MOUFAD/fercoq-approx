@@ -246,6 +246,7 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
                     break  # go to next variable
             kink_number = kink_number + 1
         iii = iii + 1
+    
     return n_active
 
 

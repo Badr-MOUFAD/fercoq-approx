@@ -12,47 +12,61 @@ cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] rQ,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* val, DOUBLE* infeas):
+
+    cdef UINT32_t N = pb.N
+    cdef UINT32_t[:] blocks = pb.blocks
+    cdef UINT32_t[:] blocks_f = pb.blocks_f
+    cdef UINT32_t[:] blocks_h = pb.blocks_h
+    cdef DOUBLE[:] cf = pb.cf
+    cdef DOUBLE[:] bf = pb.bf
+    cdef DOUBLE[:] cg = pb.cg
+    cdef DOUBLE[:] Dg_data = np.array(pb.Dg.data[0], dtype=float)
+    cdef DOUBLE[:] bg = pb.bg
+    cdef DOUBLE[:] ch = pb.ch
+    cdef DOUBLE[:] bh = pb.bh
+
     cdef UINT32_t ii, i, j, jh, l, coord, nbcoord
     val[0] = 0.
     infeas[0] = 0.
-    for i in range(pb.N):
+    for i in range(N):
         val[0] += 0.5 * x[i] * rQ[i]
 
     if pb.f_present is True:
         for j in range(len(pb.f)):
-            val[0] += pb.cf[j] * f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]],
+            val[0] += cf[j] * f[j](rf[blocks_f[j]:blocks_f[j+1]],
                                       buff,
-                                      pb.blocks_f[j+1]-pb.blocks_f[j],
+                                      blocks_f[j+1]-blocks_f[j],
                                       VAL, useless_param, useless_param)
     if pb.g_present is True:
         for ii in range(len(pb.g)):
-            nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
+            nb_coord = blocks[ii+1] - blocks[ii]
             for i in range(nb_coord):
-                coord = pb.blocks[ii] + i
-                buff_x[i] = pb.Dg.data[0][ii] * x[coord] - pb.bg[coord]
-            val[0] += pb.cg[ii] * g[ii](buff_x, buff,
+                coord = blocks[ii] + i
+                buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
+            val[0] += cg[ii] * g[ii](buff_x, buff,
                                         nb_coord, VAL, useless_param,
                                         useless_param)
     if pb.h_present is True:
         if pb.h_takes_infinite_values == False:
             for jh in range(len(pb.h)):
-                val[0] += pb.ch[jh] * h[jh](
-                                        rhx[pb.blocks_h[jh]:pb.blocks_h[jh+1]],
+                val[0] += ch[jh] * h[jh](
+                                        rhx[blocks_h[jh]:blocks_h[jh+1]],
                                         buff,
-                                        pb.blocks_h[jh+1]-pb.blocks_h[jh],
+                                        blocks_h[jh+1]-blocks_h[jh],
                                         VAL, useless_param, useless_param)
         if pb.h_takes_infinite_values == True:
             for jh in range(len(pb.h)):
-                for l in range(pb.blocks_h[jh+1]-pb.blocks_h[jh]):
-                    coord = pb.blocks_h[jh]+l
+                for l in range(blocks_h[jh+1]-blocks_h[jh]):
+                    coord = blocks_h[jh]+l
                     buff_y[l] = rhx[coord]
                 # project rhx onto the domain of h
                 h[jh](buff_y, buff,
-                            pb.blocks_h[jh+1]-pb.blocks_h[jh],
+                            blocks_h[jh+1]-blocks_h[jh],
                             PROX, 1e-20, useless_param)
-                for l in range(pb.blocks_h[jh+1]-pb.blocks_h[jh]):
-                    coord = pb.blocks_h[jh]+l
-                    infeas[0] += fabs(buff[l] - rhx[coord])
+                for l in range(blocks_h[jh+1]-blocks_h[jh]):
+                    coord = blocks_h[jh]+l
+                    infeas[0] += (buff[l] - rhx[coord]) ** 2
+                infeas[0] = sqrt(infeas[0])
 
 
 cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
@@ -61,10 +75,23 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] Sy, DOUBLE[:] z, DOUBLE[:] AfTz,
                              DOUBLE[:] w_,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
-                             DOUBLE* beta, DOUBLE* gamma, compute_z=True):
+                             DOUBLE* beta, DOUBLE* gamma, compute_z=True,
+                             compute_gamma=True):
     # We output z and AfTz because it is useful when doing variable screening
     cdef UINT32_t ii, i, j, jh, l, coord, nbcoord
     cdef DOUBLE val = 0.
+
+    cdef UINT32_t N = pb.N
+    cdef UINT32_t[:] blocks = pb.blocks
+    cdef UINT32_t[:] blocks_f = pb.blocks_f
+    cdef UINT32_t[:] blocks_h = pb.blocks_h
+    cdef DOUBLE[:] cf = pb.cf
+    cdef DOUBLE[:] bf = pb.bf
+    cdef DOUBLE[:] cg = pb.cg
+    cdef DOUBLE[:] Dg_data = np.array(pb.Dg.data[0], dtype=float)
+    cdef DOUBLE[:] bg = pb.bg
+    cdef DOUBLE[:] ch = pb.ch
+    cdef DOUBLE[:] bh = pb.bh
 
     cdef DOUBLE[:] w
     
@@ -76,73 +103,77 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
         # z is the dual variable associated to f(Af x - bf)
         if pb.f_present is True:
             for j in range(len(pb.f)):
-                f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
-                     pb.blocks_f[j+1]-pb.blocks_f[j], GRAD,
+                f[j](rf[blocks_f[j]:blocks_f[j+1]], buff,
+                     blocks_f[j+1]-blocks_f[j], GRAD,
                      useless_param, useless_param)
-                for l in range(pb.blocks_f[j+1]-pb.blocks_f[j]):
-                    coord = pb.blocks_f[j] + l
-                    z[coord] = pb.cf[j] * buff[l]
-            val += np.array(z).dot(np.array(rf)) + pb.bf.dot(np.array(z))
+                for l in range(blocks_f[j+1]-blocks_f[j]):
+                    coord = blocks_f[j] + l
+                    z[coord] = cf[j] * buff[l]
+            val += np.array(z).dot(np.array(rf)) + np.array(bf).dot(np.array(z))
             #        = f(Af x - bf) + f*(z) + bf.dot(z)
             AfTz_ = pb.Af.T.dot(np.array(z))
-            for i in range(pb.N):
+            for i in range(N):
                 AfTz[i] = AfTz_[i]  # otherwise the pointer seems to be broken
-        # else: AfTz is initialized with np.zeros(pb.N)
+        # else: AfTz is initialized with np.zeros(N)
     else:
         w = w_
-        max_w = np.norm(np.array(w), np.inf)
-        max_rQ = np.norm(np.array(rQ), np.inf)
+        max_w = np.linalg.norm(np.array(w), np.inf)
+        max_rQ = np.linalg.norm(np.array(rQ), np.inf)
         if max_w > 0:
             # we add 0.5 (x Q x + w inv(Q) w), knowing that Q x = rQ and w = rQ/scaling
             val += 0.5 * np.array(x).dot(np.array(rQ))
             val += 0.5 * np.array(x).dot(np.array(w)) * max_w / max_rQ
         if pb.f_present is True:
             for j in range(len(pb.f)):
-                val += pb.cf[j] * f[j](rf[pb.blocks_f[j]:pb.blocks_f[j+1]], buff,
-                     pb.blocks_f[j+1]-pb.blocks_f[j], VAL,
+                val += cf[j] * f[j](rf[blocks_f[j]:blocks_f[j+1]], buff,
+                     blocks_f[j+1]-blocks_f[j], VAL,
                      useless_param, useless_param)
-                for l in range(pb.blocks_f[j+1]-pb.blocks_f[j]):
-                    coord = pb.blocks_f[j] + l
-                    buff_x[l] = z[coord] / pb.cf[j]
-                val +=  pb.cf[j] * f[j](buff_x, buff,
-                     pb.blocks_f[j+1]-pb.blocks_f[j], VAL_CONJ,
+                for l in range(blocks_f[j+1]-blocks_f[j]):
+                    coord = blocks_f[j] + l
+                    buff_x[l] = z[coord] / cf[j]
+                val +=  cf[j] * f[j](buff_x, buff,
+                     blocks_f[j+1]-blocks_f[j], VAL_CONJ,
                      useless_param, useless_param)
-            val += pb.bf.dot(np.array(z))
-
+            val += np.array(bf).dot(np.array(z))
+    # print('contrib_f=', val)
+            
     if pb.h_present is True:
         AhTSy = pb.Ah.T.dot(np.array(Sy))
     else:
-        AhTSy = np.zeros(pb.N)
+        AhTSy = np.zeros(N)
 
-    cdef DOUBLE[:] xbar = np.zeros(pb.N, dtype=float)
+    cdef DOUBLE[:] xbar = np.zeros(N, dtype=float)
     cdef DOUBLE[:] ybar = np.zeros(pb.Ah.shape[0], dtype=float)
     if pb.g_present is True:
         val_g = 0.
         # compute g(x)
         for ii in range(len(pb.g)):
-            nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
+            nb_coord = blocks[ii+1] - blocks[ii]
             for i in range(nb_coord):
-                coord = pb.blocks[ii] + i
-                buff_x[i] = pb.Dg.data[0][ii] * x[coord] - pb.bg[coord]
-            val_g += pb.cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
+                coord = blocks[ii] + i
+                buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
+            val_g += cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
                                        useless_param, useless_param)
 
         # estimate dual infeasibility
         dual_infeas = 0.
         for ii in range(len(pb.g)):
-            nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
+            nb_coord = blocks[ii+1] - blocks[ii]
             for i in range(nb_coord):
-                coord = pb.blocks[ii] + i
-                buff_x[i] = 1. / pb.Dg.data[0][ii] * (
+                coord = blocks[ii] + i
+                buff_x[i] = 1. / Dg_data[ii] * (
                     - (AfTz[coord] + AhTSy[coord])
-                    + pb.bg[coord])
+                    + bg[coord])
                 # project -AfTz - AhTSy onto the domain of g*
             g[ii](buff_x, buff, nb_coord,
-                  PROX_CONJ, 1./INF, pb.cg[ii])
+                  PROX_CONJ, 1./INF, cg[ii])
             for i in range(nb_coord):
-                dual_infeas += fabs(buff[i] - buff_x[i])
+                dual_infeas += (buff[i] - buff_x[i]) ** 2
+            dual_infeas = sqrt(dual_infeas)
 
-        gamma[0] = max(1./INF, dual_infeas)
+        if compute_gamma == True:
+            gamma[0] = max(1./INF, dual_infeas)
+
         # compute g*_gamma(-AfTz - AhTSy - w;x) = -(AfTz + AhTSy + w)(xbar) - g(xbar) - gamma/2 ||x-xbar||**2
         val_g1 = 0.
         val_g2 = 0.
@@ -150,26 +181,26 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
         # note that g deals with bg directly in the prox
         for ii in range(len(pb.g)):
             # compute xbar
-            nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
+            nb_coord = blocks[ii+1] - blocks[ii]
             for i in range(nb_coord):
-                coord = pb.blocks[ii] + i
-                buff_x[i] = pb.Dg.data[0][ii] * (
+                coord = blocks[ii] + i
+                buff_x[i] = Dg_data[ii] * (
                     x[coord] - 1. / gamma[0] * \
-                       (AfTz[coord] + AhTSy[coord] + w[coord])) - pb.bg[coord]
+                       (AfTz[coord] + AhTSy[coord] + w[coord])) - bg[coord]
             g[ii](buff_x, buff, nb_coord, PROX,
-                  pb.cg[ii]*pb.Dg.data[0][ii]**2/gamma[0], useless_param)
+                  cg[ii]*Dg_data[ii]**2/gamma[0], useless_param)
             for i in range(nb_coord):
-                coord = pb.blocks[ii] + i
-                xbar[coord] = 1. / pb.Dg.data[0][ii] * (buff[i] + pb.bg[coord])
+                coord = blocks[ii] + i
+                xbar[coord] = 1. / Dg_data[ii] * (buff[i] + bg[coord])
 
             # compute g*_gamma(-AfTz - AhTSy;x)
             for i in range(nb_coord):
-                coord = pb.blocks[ii] + i
-                buff_x[i] = pb.Dg.data[0][ii] * xbar[coord] - pb.bg[coord]
-            val_g1 -= pb.cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
+                coord = blocks[ii] + i
+                buff_x[i] = Dg_data[ii] * xbar[coord] - bg[coord]
+            val_g1 -= cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
                                         useless_param, useless_param)
             for i in range(nb_coord):
-                coord = pb.blocks[ii] + i
+                coord = blocks[ii] + i
                 val_g2 -= (AfTz[coord] + AhTSy[coord] + w[coord]) * xbar[coord]
                 val_g3 -= gamma[0] / 2. * (xbar[coord] - x[coord])**2
         val += val_g + val_g1 + val_g2 + val_g3
@@ -182,50 +213,50 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
         # compute h*(Sy) + bh.Sy
         test = 0.
         for jh in range(len(pb.h)):
-            nb_coord = pb.blocks_h[jh+1] - pb.blocks_h[jh]
+            nb_coord = blocks_h[jh+1] - blocks_h[jh]
             for l in range(nb_coord):
-                coord = pb.blocks_h[jh] + l
-                buff_y[l] = Sy[coord] / pb.ch[jh]
-            val_h += pb.ch[jh] * h[jh](buff_y, buff, nb_coord,
+                coord = blocks_h[jh] + l
+                buff_y[l] = Sy[coord] / ch[jh]
+            val_h += ch[jh] * h[jh](buff_y, buff, nb_coord,
                                        VAL_CONJ, useless_param, useless_param)
             for l in range(nb_coord):
-                coord = pb.blocks_h[jh] + l
-                val_hh += pb.bh[coord] * Sy[coord]
+                coord = blocks_h[jh] + l
+                val_hh += bh[coord] * Sy[coord]
 
         if pb.h_takes_infinite_values == False:
             # compute h(Ah x - bh)
             for jh in range(len(pb.h)):
-                val_h2 += pb.ch[jh] * h[jh](
-                                        rhx[pb.blocks_h[jh]:pb.blocks_h[jh+1]],
+                val_h2 += ch[jh] * h[jh](
+                                        rhx[blocks_h[jh]:blocks_h[jh+1]],
                                         buff,
-                                        pb.blocks_h[jh+1] - pb.blocks_h[jh],
+                                        blocks_h[jh+1] - blocks_h[jh],
                                         VAL, useless_param, useless_param)
         if pb.h_takes_infinite_values == True:
             # compute h_beta(Ah x - bh; Sy) = (Ah x - bh) ybar - h*(ybar) - beta/2 ||Sy - ybar||**2
             beta[0] = max(1./INF, beta[0])
             for jh in range(len(pb.h)):
-                nb_coord = pb.blocks_h[jh+1] - pb.blocks_h[jh]
+                nb_coord = blocks_h[jh+1] - blocks_h[jh]
                 # compute ybar
                 for l in range(nb_coord):
-                    coord = pb.blocks_h[jh] + l
+                    coord = blocks_h[jh] + l
                     buff_y[l] = Sy[coord] + 1. / beta[0] * rhx[coord]
                 h[jh](buff_y, buff, nb_coord, PROX_CONJ,
-                      1./beta[0], pb.ch[jh])
+                      1./beta[0], ch[jh])
 
                 # compute -h*(ybar) = -ybar.ybarbar + h(ybarbar)
                 for l in range(nb_coord):
-                    coord = pb.blocks_h[jh] + l
+                    coord = blocks_h[jh] + l
                     ybar[coord] = buff[l]
                     buff_y[l] = Sy[coord] + INF * ybar[coord]
                 h[jh](buff_y, buff, nb_coord, PROX,
-                      pb.ch[jh]*INF, useless_param)
+                      ch[jh]*INF, useless_param)
                 for l in range(nb_coord):
                     buff_y[l] = buff[l]
                 h_ybarbar = h[jh](buff_y, buff, nb_coord, VAL,
                                   useless_param, useless_param)
                 val_h2 += h_ybarbar
                 for l in range(nb_coord):
-                    coord = pb.blocks_h[jh] + l
+                    coord = blocks_h[jh] + l
                     val_h2 -= buff_y[l] * ybar[coord]
                     val_h2 += rhx[coord] * ybar[coord] - beta[0] / 2. * (Sy[coord] - ybar[coord])**2
         # print('contrib h:', val_h, val_hh, val_h2, np.array(Sy))

@@ -126,7 +126,13 @@ cdef DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pro
             buff[i] = sign(x[i]) * max(0., fabs(x[i]) - prox_param)
         return buff[0]
     elif mode == PROX_CONJ:
-        return prox_conj(abs, x, buff, nb_coord, prox_param, prox_param2)
+        for i in range(nb_coord):
+            val = fabs(x[i])
+            if val > prox_param2:
+                buff[i] = x[i] / val * prox_param2
+            else:
+                buff[i] = x[i]
+        # return prox_conj(abs, x, buff, nb_coord, prox_param, prox_param2)
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
@@ -173,7 +179,15 @@ cdef DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE p
                 buff[i] = 0.
         return buff[0]
     elif mode == PROX_CONJ:
-        return prox_conj(norm2, x, buff, nb_coord, prox_param, prox_param2)
+        if val > prox_param2:
+            for i in range(nb_coord):
+                buff[i] = x[i] / val * prox_param2
+        else:
+            for i in range(nb_coord):
+                buff[i] = x[i]
+        return buff[0]
+        # numerically instable version
+        # return prox_conj(norm2, x, buff, nb_coord, prox_param, prox_param2)
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]
@@ -311,7 +325,9 @@ cdef DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, D
                 return 0
         return 1
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented(box_zero_one, x, buff, nb_coord)
+        for i in range(nb_coord):
+            val += fmax(0., x[i])
+        return val  # val_conj_not_implemented(box_zero_one, x, buff, nb_coord)
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 1.:

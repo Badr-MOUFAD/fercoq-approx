@@ -78,7 +78,6 @@ class Problem:
             if len(blocks_f) != len(f) + 1 or blocks_f[-1] != Af.shape[0]:
                   raise Warning("blocks_f seems to be ill defined.")
             
-
             if g is not None:
                   self.g_present = True
                   if len(g) != len(self.blocks) - 1:
@@ -137,8 +136,10 @@ class Problem:
             if len(blocks_h) != len(h) + 1 or blocks_h[-1] != Ah.shape[0]:
                     raise Warning("blocks_h seems to be ill defined.")
             if Q is None:
+                self.Q_present = False
                 Q = sparse.csc_matrix((N, N))  # 0 matrix
             else:
+                self.Q_present = True
                 Q = sparse.csc_matrix(Q)
                 if Q.shape[0] != Q.shape[1] or Q.shape[0] != N:
                     raise Warning("Q should be a square N x N matrix.")
@@ -171,7 +172,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            check_period=10, step_size_factor=1.,
                            sampling='uniform', int accelerated=False,
                            int restart_period=0, callback=None, int per_pass=1,
-                           screening=None):
+                           screening=None, gamma_print_=None):
     # pb is a Problem as defined above
     # max_iter: maximum number of passes over the data
     # max_time: in seconds
@@ -190,7 +191,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     # For details on the algorithms, see algorithms.pyx
     
     #--------------------- Prepare data ----------------------#
-    
+
+    start_time = time.time()
     cdef UINT32_t ii, j, jj, k, l, i, coord, lh, jh
     cdef UINT32_t f_iter
     cdef UINT32_t nb_coord
@@ -220,15 +222,18 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] Ah_data = np.array(pb.Ah.data, dtype=float)  # Fortunately, it seems that the same thing happens here.
     cdef UINT32_t[:] Ah_nnz_perrow = np.array((pb.Ah!=0).sum(axis=1), dtype=np.uint32).ravel()
     cdef DOUBLE[:] bh = pb.bh
+    cdef int Q_present = pb.Q_present
     cdef UINT32_t[:] Q_indptr = np.array(pb.Q.indptr, dtype=np.uint32)
     cdef UINT32_t[:] Q_indices = np.array(pb.Q.indices, dtype=np.uint32)
     cdef DOUBLE[:] Q_data = np.array(pb.Q.data, dtype=float)
 
     cdef int f_present = pb.f_present
     cdef atom* f
+    cdef UINT32_t len_pb_f = 0
     if f_present is True:
-        f = <atom*>malloc(len(pb.f)*sizeof(atom))
-        for j in range(len(pb.f)):
+        len_pb_f = len(pb.f)
+        f = <atom*>malloc(len_pb_f*sizeof(atom))
+        for j in range(len_pb_f):
             if sys.version_info[0] > 2 and isinstance(pb.f[j], bytes) == True:
                 pb.f[j] = pb.f[j].encode()
             f[j] = string_to_func(<bytes>pb.f[j])
@@ -248,16 +253,18 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
     cdef int h_present = pb.h_present
     cdef atom* h
+    cdef UINT32_t len_pb_h = 0
     if h_present is True:
-        h = <atom*>malloc(len(pb.h)*sizeof(atom))
-        for jh in range(len(pb.h)):
+        len_pb_h = len(pb.h)
+        h = <atom*>malloc(len_pb_h*sizeof(atom))
+        for jh in range(len_pb_h):
             if sys.version_info[0] > 2 and isinstance(pb.h[jh], bytes) == True:
                 pb.h[jh] = pb.h[jh].encode()
             h[jh] = string_to_func(<bytes>pb.h[jh])
     else:
         h = <atom*>malloc(0)  # just to remove uninitialized warning
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
-
+    
     # We have two kind of dual vectors so the user may use any of them to initialize
     if accelerated == False:
         if pb.y_init.shape[0] == pb.Ah.nnz or h_present is False:
@@ -280,7 +287,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef UINT32_t[:] inv_blocks_f = np.zeros(pb.Af.shape[0], dtype=np.uint32)
 
     if f_present is True:
-        for j in range(len(pb.f)):
+        for j in range(len_pb_f):
             for i in range(blocks_f[j+1] - blocks_f[j]):
                 inv_blocks_f[blocks_f[j]+i] = j
                 
@@ -295,7 +302,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     if h_present is True:
         # As h is not required to be separable, we need some preprocessing
         # to detect what dual variables need to be processed
-        for jh in range(len(pb.h)):
+        for jh in range(len_pb_h):
             for i in range(blocks_h[jh+1] - blocks_h[jh]):
                 inv_blocks_h[blocks_h[jh]+i] = jh
         dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
@@ -309,7 +316,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 dual_vars_to_update[ii][i+1] = dual_vars_to_update_[ii][i]
     else:
         dual_vars_to_update = np.empty((0,0), dtype=np.uint32)
-
+        
     # Definition of residuals
     cdef DOUBLE[:] rf
     if f_present is True:
@@ -358,7 +365,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         rhxc = np.empty(0)
         rQe = np.empty(0)
         rQc = np.empty(0)
-
+        
     cdef DOUBLE theta0 = 1. / n
     cdef DOUBLE theta = theta0
     cdef DOUBLE c_theta = 1.
@@ -388,10 +395,13 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         xe_ii = np.zeros(max_nb_coord)
 
     # Compute Lipschitz constants
-    cdef DOUBLE[:] tmp_Lf = np.zeros(len(pb.f))
-    svdsQ1 = spl.svds(pb.Q, 1)
+    cdef DOUBLE[:] tmp_Lf = np.zeros(len_pb_f)
+    if Q_present:
+        svdsQ1 = spl.svds(pb.Q, 1)
+    else:
+        svdsQ1 = [[0],[1e-30],[0]]
     cdef DOUBLE max_Lf = svdsQ1[1][0]  # Largest eigenvalue of Q
-    for j in range(len(pb.f)):
+    for j in range(len_pb_f):
         tmp_Lf[j] = cf[j] * f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
                          LIPSCHITZ, useless_param, useless_param)
         max_Lf = fmax(max_Lf, tmp_Lf[j])
@@ -407,19 +417,23 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     j = inv_blocks_f[jj]
                     Lf[ii] += Af_data[l]**2 * tmp_Lf[j]
     del tmp_Lf
+    
     cdef DOUBLE[:] primal_step_size = 1. / np.array(Lf)
     cdef DOUBLE[:] dual_step_size = np.zeros(pb.Ah.shape[0])
     cdef DOUBLE[:] norm2_columns_Ah = np.zeros(n)
     if h_present is True:
         if accelerated is True:
-            for i in range(n):
-                norm2_columns_Ah[i] = (pb.Ah[:,blocks[i]:blocks[i+1]]\
-                                .multiply(pb.Ah[:,blocks[i]:blocks[i+1]])).sum()
+            for ii in range(n):
+                for i in range(blocks[ii+1] - blocks[ii]):
+                    coord = blocks[ii] + i
+                    for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                        norm2_columns_Ah[ii] += Ah_data[l] ** 2
         else:
-            for i in range(n):
-                norm2_columns_Ah[i] = ((pb.Ah[:,blocks[i]:blocks[i+1]]\
-                                .multiply(pb.Ah[:,blocks[i]:blocks[i+1]])).T\
-                                .multiply(np.array(Ah_nnz_perrow))).sum()
+            for ii in range(n):
+                for i in range(blocks[ii+1] - blocks[ii]):
+                    coord = blocks[ii] + i
+                    for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                        norm2_columns_Ah[ii] += Ah_data[l] ** 2 * Ah_nnz_perrow[Ah_indices[l]]
         dual_step_size = np.maximum(
             1. / np.sqrt(np.array(norm2_columns_Ah) + 1e-30),
             np.array(Lf) / (np.array(norm2_columns_Ah) + 1e-30)) \
@@ -440,7 +454,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] z = np.zeros(pb.Af.shape[0])  # useful for screening
     cdef DOUBLE[:] AfTz = np.zeros(N)  # useful for screening
     if screening == 'gapsafe' and h_present is True:
-        print('Gap safe screening not analyzed when h is present,'
+        print('Gap safe screening not analyzed when h is present, '
                   'we are deactivating it.')
         screening = None
     if screening == 'gapsafe':
@@ -450,8 +464,11 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             nb_coord = blocks[ii+1] - blocks[ii]
             k = 0
             l = Af_indptr[blocks[ii]]
-            Qii = np.linalg.norm(Q[blocks[ii]:blocks[ii+1]].data)
-            # for Q psd, Qii is zero if and only if the i-i subblock is zero.
+            if Q_present:
+                Qii = np.linalg.norm(pb.Q[blocks[ii]:blocks[ii+1]].data)
+                # for Q psd, Qii is zero if and only if the i-i subblock is zero.
+            else:
+                Qii = 0
             norms_Af[ii] = polar_matrix_norm(abs,
                             &Af_indptr[blocks[ii]], nb_coord,
                             Af_indices, Af_data, Qii, 0)
@@ -486,8 +503,13 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         
     cdef DOUBLE change_in_x
     cdef DOUBLE change_in_y
-    smoothed_gap, beta_print, gamma_print = 0., 0., 0.
-
+    smoothed_gap = 0.
+    if gamma_print_ is None:
+        compute_gamma = True
+    else:
+        compute_gamma = False
+        gamma_print = gamma_print_
+    
     #----------------------- Main loop ----------------------------#
     init_time = time.time()
     if verbose > 0:
@@ -533,7 +555,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x, &change_in_y)
-        else:
+        elif accelerated == True:
             one_step_accelerated_coordinate_descent(x,
                     xe, xc, y_center, prox_y, rhxe, rhxc, rfe, rfc,
                     rhy, rQe, rQc, &theta, theta0, &c_theta, &beta,
@@ -570,10 +592,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     for i in range(N):
                         x[i] = xe[i] + c_theta * xc[i]
                     if f_present is True:
-                        for j in range(pb.Af.shape[0]):
+                        for j in range(blocks_f[len_pb_f]):
                             rf[j] = rfe[j] + c_theta * rfc[j]
                     if h_present is True:
-                        for l in range(pb.Ah.shape[0]):
+                        for l in range(blocks_h[len_pb_h]):
                             rhx[l] = rhxe[l] + c_theta * rhxc[l]
                             
                 compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
@@ -595,7 +617,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     # When we print, we check
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
-                        for j in range(len(pb.h)):
+                        for j in range(len_pb_h):
                             if accelerated == False:
                                 # Compute one more prox_h* in case Sy is not feasible
                                 for l in range(blocks_h[j+1]-blocks_h[j]):
@@ -620,7 +642,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
                                         rf, rhx, rQ, prox_y, z, AfTz, rQ,
                                         buff_x, buff_y, buff,
-                                        &beta_print, &gamma_print)
+                                        &beta_print, &gamma_print,
+                                        compute_z=True,
+                                        compute_gamma=compute_gamma)
 
                     if print_style == 'smoothed_gap' and print_time == True:
                         print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
@@ -653,8 +677,18 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             if do_restart is True:
                 xe = np.array(xe) + c_theta * np.array(xc)
                 rfe = np.array(rfe) + c_theta * np.array(rfc)
+                rQe = np.array(rQe) + c_theta * np.array(rQc)
                 xc = np.zeros(x.shape[0])
                 rfc = np.zeros(rf.shape[0])
+                rQc = np.zeros(rQ.shape[0])
+
+                if screening == 'gapsafe':
+                    # I do not know why but the residual update has rather
+                    # large errors in this case
+                    #   => recompute residuals
+                    rQe = pb.Q.dot(xe)
+                    rfe = pb.Af.dot(xe) - pb.bf
+
                 if h_present is True:
                     rhxe = np.array(rhxe) + c_theta * np.array(rhxc)
                     rhxc = np.zeros(rhx.shape[0])
@@ -688,6 +722,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         pb.dual_sol_duplicated = np.array(y).copy()
     else:
         pb.dual_sol = np.array(prox_y).copy()
+        pb.dual_sol_duplicated = np.zeros(pb.Ah.nnz, dtype=float)
+        for i in range(N):
+            for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
+                pb.dual_sol_duplicated[lh] = prox_y[Ah_indices[lh]]
 
     free(f)
     free(g)
