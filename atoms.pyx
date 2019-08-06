@@ -315,7 +315,14 @@ cdef DOUBLE box_zero_one(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, D
             buff[i] = min(1., max(0., x[i]))
         return buff[0]
     elif mode == PROX_CONJ:
-        return prox_conj(box_zero_one, x, buff, nb_coord, prox_param, prox_param2)
+        for i in range(nb_coord):
+            if x[i] < 0.:
+                buff[i] = x[i]
+            elif x[i] > prox_param:
+                buff[i] = x[i] - prox_param
+            else:
+                buff[i] = 0.
+        # return prox_conj(box_zero_one, x, buff, nb_coord, prox_param, prox_param2)
     elif mode == LIPSCHITZ:
         buff[0] = INF
         return buff[0]

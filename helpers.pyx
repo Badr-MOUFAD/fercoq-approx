@@ -66,7 +66,7 @@ cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
                 for l in range(blocks_h[jh+1]-blocks_h[jh]):
                     coord = blocks_h[jh]+l
                     infeas[0] += (buff[l] - rhx[coord]) ** 2
-                infeas[0] = sqrt(infeas[0])
+            infeas[0] = sqrt(infeas[0])
 
 
 cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
@@ -162,14 +162,14 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 buff_x[i] = 1. / Dg_data[ii] * (
-                    - (AfTz[coord] + AhTSy[coord])
+                    - (AfTz[coord] + AhTSy[coord] + w[coord])
                     + bg[coord])
-                # project -AfTz - AhTSy onto the domain of g*
+                # project -AfTz - AhTSy - w onto the domain of g*
             g[ii](buff_x, buff, nb_coord,
                   PROX_CONJ, 1./INF, cg[ii])
             for i in range(nb_coord):
                 dual_infeas += (buff[i] - buff_x[i]) ** 2
-            dual_infeas = sqrt(dual_infeas)
+        dual_infeas = sqrt(dual_infeas)
 
         if compute_gamma == True:
             gamma[0] = max(1./INF, dual_infeas)

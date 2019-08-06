@@ -636,6 +636,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                  ch[j])
                             for l in range(blocks_h[j+1]-blocks_h[j]):
                                 prox_y[blocks_h[j]+l] = buff[l]
+                            if accelerated == -1:  # rather dangerous
+                                prox_y[blocks_h[j]+l] = y_center[blocks_h[j]+l]
                     else:
                         beta_print = 0
 
