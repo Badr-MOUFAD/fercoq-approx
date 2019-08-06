@@ -13,6 +13,7 @@ Examples are provided in the file test.py
 
 The solver solves the optimization problem using a coordinate descent method. Under the hood, efficient residual updates and duplication of dual variables are performed.
 
+More information in the paper A generic coordinate descent solver for nonsmooth convex optimization https://arxiv.org/abs/1812.00628.
 
 Copyright Olivier Fercoq -- Telecom ParisTech
 

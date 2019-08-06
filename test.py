@@ -10,7 +10,7 @@ from helpers import check_grad
 # imports for loading datasets
 from scipy import io
 from sklearn.datasets.mldata import fetch_mldata
-from sklearn.datasets import svmlight_format
+from sklearn.datasets import svmlight_format, fetch_rcv1
 #from sklearn.externals.joblib import Memory
 #import sys
 #sys.path.append("../tv_l1_solver")
@@ -188,12 +188,12 @@ for prob in probs:
         print("dual SVM with intercept on RCV1")
 
         # data = svmlight_format.load_svmlight_file('/home/ofercoq/scikit_learn_data/mldata/rcv1_train.binary')
-        data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+        # data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+        data = fetch_rcv1()
 
-        #X = data[0].astype(np.float)
-        #y = data[1].astype(np.float).ravel()
-        X = data['X']
-        y = data['y'].astype(np.float).ravel()
+
+        X = data.data.astype(np.float)
+        y = data.target.astype(np.float).ravel()
         
         C = 1. / X.shape[0]
         alpha = 0.25 / X.shape[0]
