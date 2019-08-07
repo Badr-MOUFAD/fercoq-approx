@@ -170,7 +170,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            verbose=0, print_style='classical',
                            min_change_in_x=1e-15, tolerance=0,
                            check_period=10, step_size_factor=1.,
-                           sampling='uniform', int accelerated=False,
+                           sampling='uniform', algorithm='vu-condat-cd',
                            int restart_period=0, callback=None, int per_pass=1,
                            screening=None, gamma_print_=None):
     # pb is a Problem as defined above
@@ -183,7 +183,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     # check_period: period for smoothed gap computation
     # step_size_factor: number to balance primal and dual step sizes
     # sampling: either 'uniform' or 'kink_half'
-    # accelerated: if True, the algorithm with momentum is implemented
+    # algorithm: either 'vu-condat-cd', 'smart-cd', 's-tri-pd' or 's-pdhg'
+    #    'cd' = 'vu-condat-cd' and 'approx' = 'smart-cd'
     # restart_period: initial restart period for accelerated method
     # per_pass: number of times we go through the data before releasing the gil
     # screening: if screening == 'gapsafe': do gap safe screening (Ndiaye et al)
@@ -193,6 +194,12 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     #--------------------- Prepare data ----------------------#
 
     start_time = time.time()
+
+    if algorithm == 'approx':
+        algorithm = 'smart-cd'
+    if algorithm == 'cd':
+        algorithm = 'vu-condat-cd'
+    
     cdef UINT32_t ii, j, jj, k, l, i, coord, lh, jh
     cdef UINT32_t f_iter
     cdef UINT32_t nb_coord
@@ -266,7 +273,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef int h_takes_infinite_values = pb.h_takes_infinite_values
     
     # We have two kind of dual vectors so the user may use any of them to initialize
-    if accelerated == False:
+    if algorithm == 'smart-cd':
         if pb.y_init.shape[0] == pb.Ah.nnz or h_present is False:
             y = pb.y_init.copy()
         else:
@@ -330,7 +337,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         rhx = np.empty(0)
     cdef DOUBLE[:] rhy = np.zeros(pb.Ah.shape[1])
     cdef DOUBLE[:] Sy = np.zeros(pb.Ah.shape[0])
-    if h_present is True and accelerated is False:
+    if h_present is True and algorithm == 'vu-condat-cd':
         # Sy is the mean of the duplicates of y
         for i in range(N):
             for l in range(Ah_indptr[i], Ah_indptr[i+1]):
@@ -347,7 +354,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] rhxc
     cdef DOUBLE[:] rQe
     cdef DOUBLE[:] rQc
-    if accelerated == True:
+    if algorithm == 'smart-cd':
         xe = x.copy()
         xc = np.zeros(x.shape[0])
         rfe = np.array(rf).copy()
@@ -390,7 +397,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] buff = np.zeros(max([max_nb_coord, max_nb_coord_h, max_nb_coord_f]))
     cdef DOUBLE[:] xc_ii
     cdef DOUBLE[:] xe_ii
-    if accelerated == True:
+    if algorithm == 'smart-cd':
         xc_ii = np.zeros(max_nb_coord)
         xe_ii = np.zeros(max_nb_coord)
 
@@ -422,27 +429,29 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] dual_step_size = np.zeros(pb.Ah.shape[0])
     cdef DOUBLE[:] norm2_columns_Ah = np.zeros(n)
     if h_present is True:
-        if accelerated is True:
+        if algorithm == 'smart-cd':
             for ii in range(n):
                 for i in range(blocks[ii+1] - blocks[ii]):
                     coord = blocks[ii] + i
                     for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                         norm2_columns_Ah[ii] += Ah_data[l] ** 2
-        else:
+        elif algorithm == 'vu-condat-cd':
             for ii in range(n):
                 for i in range(blocks[ii+1] - blocks[ii]):
                     coord = blocks[ii] + i
                     for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                         norm2_columns_Ah[ii] += Ah_data[l] ** 2 * Ah_nnz_perrow[Ah_indices[l]]
+        else: raise Exception('Not implemented')
         dual_step_size = np.maximum(
             1. / np.sqrt(np.array(norm2_columns_Ah) + 1e-30),
             np.array(Lf) / (np.array(norm2_columns_Ah) + 1e-30)) \
                             * step_size_factor
-        if accelerated == True:
+        if algorithm == 'smart-cd':
             beta0 = 1. / np.maximum(1e-30, np.max(np.array(dual_step_size)))
-        else:
+        elif algorithm == 'vu-condat-cd':
             primal_step_size = 0.9 / (Lf + np.array(dual_step_size)
                                           * np.array(norm2_columns_Ah))
+        else: raise Exception('Not implemented')
     beta = beta0
 
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
@@ -487,7 +496,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     if sampling_law == 1:
         focus_set = np.arange(n, dtype=np.uint32)
         n_focus = n
-        if accelerated == True:
+        if algorithm == 'smart-cd':
             theta0 = 0.5 / n
             theta = theta0
     else:
@@ -537,7 +546,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         change_in_x = 0.
         change_in_y = 0.
 
-        if accelerated == False:
+        if algorithm == 'smart-cd':
             one_step_coordinate_descent(x,
                     y, Sy, prox_y, rhx, rf, rhy, rhy_ii, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
@@ -555,7 +564,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x, &change_in_y)
-        elif accelerated == True:
+        elif algorithm == 'smart-cd':
             one_step_accelerated_coordinate_descent(x,
                     xe, xc, y_center, prox_y, rhxe, rhxc, rfe, rfc,
                     rhy, rQe, rQc, &theta, theta0, &c_theta, &beta,
@@ -588,7 +597,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 check_time = False
             if print_time == True or check_time == True:
                 # Compute value
-                if accelerated is True:
+                if algorithm == 'smart-cd':
                     for i in range(N):
                         x[i] = xe[i] + c_theta * xc[i]
                     if f_present is True:
@@ -618,16 +627,17 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
                         for j in range(len_pb_h):
-                            if accelerated == False:
+                            if algorithm == 'vu-condat-cd':
                                 # Compute one more prox_h* in case Sy is not feasible
                                 for l in range(blocks_h[j+1]-blocks_h[j]):
                                     buff_y[l] = Sy[blocks_h[j]+l] \
                                       + rhx[blocks_h[j]+l] * dual_step_size[j]
-                            else:  # accelerated == True:
+                            elif algorithm == 'smart-cd':
                                 # Compute dual vector
                                 for l in range(blocks_h[j+1]-blocks_h[j]):
                                     buff_y[l] = y_center[blocks_h[j]+l] \
                                       + rhx[blocks_h[j]+l] / beta
+                            else: raise Exception('Not implemented')
 
                             h[j](buff_y, buff,
                                  blocks_h[j+1]-blocks_h[j],
@@ -636,8 +646,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                  ch[j])
                             for l in range(blocks_h[j+1]-blocks_h[j]):
                                 prox_y[blocks_h[j]+l] = buff[l]
-                            if accelerated == -1:  # rather dangerous
-                                prox_y[blocks_h[j]+l] = y_center[blocks_h[j]+l]
+                                if algorithm == None
+                                    prox_y[blocks_h[j]+l] = y_center[blocks_h[j]+l]
                     else:
                         beta_print = 0
 
@@ -668,12 +678,12 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                               pb, f, g, h, Lf,
                               x, rf, rhx, rQ, prox_y, z, AfTz,
                               xe, xc, rfe, rfc, rQe, rQc, buff_x, buff_y, buff,
-                              g_norms_Af, norms_Af, max_Lf, accelerated)
+                              g_norms_Af, norms_Af, max_Lf, algorithm=='smart-cd')
         if sampling_law == 1 and g_present is True:
             n_focus = update_focus_set(focus_set, n_active, active_set,
                                            g, pb, x, buff_x, buff)
 
-        if accelerated is True and restart_period > 0:
+        if algorithm == 'smart-cd' and restart_period > 0:
             do_restart, next_period = variable_restart(restart_history,
                                         iter - offset, restart_period, next_period)
             if do_restart is True:
@@ -719,15 +729,17 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                 "Change in x": change_in_x, "Change_in_y": change_in_x,
                                 "Primal value": primal_val, "Infeasibility": infeas}
     pb.sol = np.array(x).copy()
-    if accelerated is False:
+    if algorithm == 'smart-cd'::
         pb.dual_sol = np.array(Sy).copy()
         pb.dual_sol_duplicated = np.array(y).copy()
-    else:
+    elif algorithm == 'vu-condat-cd':
         pb.dual_sol = np.array(prox_y).copy()
         pb.dual_sol_duplicated = np.zeros(pb.Ah.nnz, dtype=float)
         for i in range(N):
             for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
                 pb.dual_sol_duplicated[lh] = prox_y[Ah_indices[lh]]
+    else:
+        raise Exception('Not implemented')
 
     free(f)
     free(g)

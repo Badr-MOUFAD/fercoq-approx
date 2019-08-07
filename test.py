@@ -28,8 +28,28 @@ test = check_grad('logsumexp', [1, -2, 3], nb_coord=3)
 print('logsumexp', test[0])
 
 
+if 1:
+    # test theta_s_tri_pd
+    from algorithms_stripd import compute_theta_s_tri_pd
+    from algorithms import find_dual_variables_to_update
+    Ah = np.array([[-1, 1], [2,0]])
+    Ah = sp.csc_matrix(Ah)
+    m, n = Ah.shape
+    dual_vars_to_update_ = find_dual_variables_to_update(np.uint32(n),
+                                np.arange(n+1, dtype=np.uint32),
+                                np.arange(m+1, dtype=np.uint32),
+                                np.array(Ah.indptr, dtype=np.uint32),
+                                np.array(Ah.indices, dtype=np.uint32),
+                                np.arange(m, dtype=np.uint32))
+    theta, dual_vars_to_update_2 = compute_theta_s_tri_pd(Ah,
+                               np.uint32(n), np.arange(n+1, dtype=np.uint32),
+                               np.arange(m+1, dtype=np.uint32),
+                               np.array(Ah.indptr, dtype=np.uint32),
+                               np.array(Ah.indices, dtype=np.uint32),
+                               np.arange(m, dtype=np.uint32))
+    print(theta, ', ', dual_vars_to_update_2, ', ', dual_vars_to_update_)
 
-probs = [6]
+probs = []
 
 for prob in probs:
     if prob == 0:

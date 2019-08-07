@@ -102,7 +102,7 @@ cdef void one_step_coordinate_descent(DOUBLE[:] x,
                 lh = dual_vars_to_update[ii][1+i]
                 jh = Ah_indices[lh]  # jh in [0, Ah.shape[0][
                 j_prev = j
-                j = inv_blocks_h[Ah_indices[lh]]
+                j = inv_blocks_h[jh]
                 if (i == 0 or j != j_prev):
                     for l in range(blocks_h[j+1]-blocks_h[j]):
                         buff_y[l] = Sy[blocks_h[j]+l] \
@@ -301,7 +301,7 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                 lh = dual_vars_to_update[ii][1+i]
                 jh = Ah_indices[lh]  # jh in [0, Ah.shape[0][
                 j_prev = j
-                j = inv_blocks_h[Ah_indices[lh]]
+                j = inv_blocks_h[jh]
                 if (i == 0 or j != j_prev):
                     for l in range(blocks_h[j+1]-blocks_h[j]):
                         jj = blocks_h[j]+l
