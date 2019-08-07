@@ -135,8 +135,8 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                      blocks_f[j+1]-blocks_f[j], VAL_CONJ,
                      useless_param, useless_param)
             val += np.array(bf).dot(np.array(z))
-    # print('contrib_f=', val)
-            
+    # print('contrib_f=', val, np.array(z).dot(np.array(rf)), np.array(bf).dot(np.array(z)))
+
     if pb.h_present is True:
         AhTSy = pb.Ah.T.dot(np.array(Sy))
     else:

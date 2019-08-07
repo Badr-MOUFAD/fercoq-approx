@@ -19,7 +19,7 @@ cdef inline UINT32_t rand_int(UINT32_t end, UINT32_t* random_state) nogil:
     return our_rand_r(random_state) % end
 
 
-def compute_theta_s_tri_pd(Ah, UINT32_t n,
+def compute_theta_s_tri_pd(UINT32_t n, UINT32_t Ah_shape0,
                         UINT32_t[:] blocks, UINT32_t[:] blocks_h,
                         UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices,
                         UINT32_t[:] inv_blocks_h, UINT32_t keep_all=0):
@@ -58,7 +58,7 @@ def compute_theta_s_tri_pd(Ah, UINT32_t n,
     m = max([len(dual_vars_to_update_2[ii]) for ii in range(n)])
     for ii in range(n):
         while len(dual_vars_to_update_2[ii]) < m:
-            random_numbers = list(np.random.randint(0, Ah.shape[0],
+            random_numbers = list(np.random.randint(0, Ah_shape0,
                               m - len(dual_vars_to_update_2[ii])))
             dual_vars_to_update_2[ii] = sorted(set(dual_vars_to_update_2[ii]
                                                        + random_numbers))
@@ -68,7 +68,7 @@ def compute_theta_s_tri_pd(Ah, UINT32_t n,
     return theta_s_tri_pd, dual_vars_to_update_2
 
 
-cdef void s_tri_pd(DOUBLE[:] x,
+cdef void one_step_s_tri_pd(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] prox_y, DOUBLE[:] rhx,
         DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,

@@ -11,7 +11,7 @@ cdef enum:
     # particularly tiny on Windows/MSVC.
     RAND_R_MAX = 0x7FFFFFFF
 
-cdef void s_tri_pd(DOUBLE[:] x,
+cdef void one_step_s_tri_pd(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] prox_y, DOUBLE[:] rhx,
         DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,

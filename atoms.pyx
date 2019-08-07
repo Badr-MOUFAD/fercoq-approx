@@ -409,6 +409,7 @@ cdef DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOU
 cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil:
     # Function x -> 0
     cdef int i
+    cdef DOUBLE val = 0
     if mode == GRAD:
         for i in range(nb_coord):
             buff[i] = 0.
@@ -425,7 +426,11 @@ cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pr
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented(zero, x, buff, nb_coord)
+        for i in range(nb_coord):
+            if fabs(x[i]) > 1./INF:
+                val += INF
+            return val
+        # return val_conj_not_implemented(zero, x, buff, nb_coord)
     else:  # mode == VAL
         return 0.
 
