@@ -222,10 +222,6 @@ cdef void one_step_s_tri_pd(DOUBLE[:] x,
 
     return
 
-# TODO:
-# - spdhg
-# - rpdbu
-
 
 cdef void one_step_s_pdhg(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] rhx,
@@ -382,3 +378,7 @@ def transform_f_into_h(pb):
         pb.h_present = True
 
     return
+
+
+# TODO:
+# - rpdbu https://arxiv.org/pdf/1605.05969.pdf
