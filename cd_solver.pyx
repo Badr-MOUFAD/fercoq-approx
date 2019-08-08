@@ -20,10 +20,11 @@ from algorithms cimport one_step_coordinate_descent
 from algorithms cimport one_step_accelerated_coordinate_descent
 from algorithms cimport RAND_R_MAX
 from algorithms_stripd cimport one_step_s_tri_pd
+from algorithms_stripd cimport one_step_s_pdhg
 from screening cimport polar_matrix_norm, do_gap_safe_screening, update_focus_set
 
 from algorithms import find_dual_variables_to_update, variable_restart
-from algorithms_stripd import compute_theta_s_tri_pd
+from algorithms_stripd import compute_theta_s_tri_pd, transform_f_into_h
 
 # The following three functions are copied from Scikit Learn.
 
@@ -186,7 +187,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     # step_size_factor: number to balance primal and dual step sizes
     # sampling: either 'uniform' or 'kink_half'
     # algorithm: either 'vu-condat-cd', 'smart-cd', 's-tri-pd', 's-pdhg',
-    #    
+    #    'rpdbu',
     #    'cd' = 'vu-condat-cd' and 'approx' = 'smart-cd'
     # restart_period: initial restart period for accelerated method
     # per_pass: number of times we go through the data before releasing the gil
@@ -217,6 +218,11 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         pb.cg = np.ones(len(pb.g))
         pb.Dg = sparse.eye(len(pb.g))
         pb.bg = np.zeros(pb.N)
+    if algorithm == 's-pdhg' and pb.f_present == True:
+        if verbose > 0:
+            print('s-pdhg does not support differentiable functions, '
+                      'transforming the problem')
+        transform_f_into_h(pb)
 
     cdef DOUBLE[:] x = pb.x_init.copy()
     cdef DOUBLE[:] y
@@ -294,7 +300,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             for i in range(N):
                 for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
                     y[lh] = pb.y_init[Ah_indices[lh]]
-    elif algorithm == 'smart-cd' or algorithm == 's_tri_pd' or algorithm == None:
+    elif algorithm == 'smart-cd' or algorithm == 's-tri-pd' \
+            or algorithm == 's-pdhg' or algorithm == None:
         if pb.y_init.shape[0] == pb.Ah.shape[0] or h_present is False:
             y_center = pb.y_init.copy()
         else:
@@ -303,8 +310,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
                     # we take only the last copy of pb.y_init[lh]
                     y_center[Ah_indices[lh]] = pb.y_init[lh]
-        if algorithm == 's_tri_pd' or algorithm == None:
-            y = y_center
+        y = y_center.copy()
     else: raise Exception('Not implemented')
 
     cdef UINT32_t[:] inv_blocks_f = np.zeros(pb.Af.shape[0], dtype=np.uint32)
@@ -322,7 +328,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
     cdef UINT32_t[:] inv_blocks_h = np.zeros(pb.Ah.shape[0], dtype=np.uint32)
     cdef UINT32_t[:,:] dual_vars_to_update
-    cdef DOUBLE[:] theta_s_tri_pd
+    cdef DOUBLE[:] theta_s_tri_pd = np.empty(1)
     if h_present is True and algorithm is not None:
         # As h is not required to be separable, we need some preprocessing
         # to detect what dual variables need to be processed
@@ -333,10 +339,13 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
                                                 Ah_indptr, Ah_indices, inv_blocks_h)
         elif algorithm == 's-tri-pd':
-            dual_vars_to_update_, theta_s_tri_pd_ = compute_theta_s_tri_pd(n,
+            theta_s_tri_pd_, dual_vars_to_update_ = compute_theta_s_tri_pd(n,
                                                 pb.Ah.shape[0], blocks, blocks_h,
                                                 Ah_indptr, Ah_indices, inv_blocks_h)
-            theta_s_tri_pd = np.array(theta_s_tri_pd_)
+            theta_s_tri_pd = np.array(theta_s_tri_pd_, dtype=float)
+        elif algorithm == 's-pdhg':
+            dual_vars_to_update_ = [[0]]*n  # all the dual variables are updated so nothing to do here.
+        else: raise Exception('Not implemented')
 
         dual_vars_to_update = np.empty((n,1+max([len(dual_vars_to_update_[ii])
                                                         for ii in range(n)])),
@@ -361,7 +370,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         rhx = pb.Ah * x - pb.bh
     else:
         rhx = np.empty(0)
-    if algorithm == 's-tri-pd':
+    if algorithm == 's-tri-pd' or algorithm == 's-pdhg':
         rhx_jj = np.array(rhx).copy()
     cdef DOUBLE[:] rhy = np.zeros(pb.Ah.shape[1])
     cdef DOUBLE[:] Sy = np.zeros(pb.Ah.shape[0])
@@ -371,7 +380,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             for l in range(Ah_indptr[i], Ah_indptr[i+1]):
                 Sy[Ah_indices[l]] += y[l] / Ah_nnz_perrow[Ah_indices[l]]
                 rhy[i] += Ah_data[l] * y[l]
-    elif h_present is True and (algorithm == 's-tri-pd' or algorithm == None):
+    elif h_present is True and (algorithm == 's-tri-pd'
+                or algorithm == 's-pdhg' or algorithm == None):
         Sy = y
         # Just a convenient alias since y does not have any
         #    duplicate in this case
@@ -460,41 +470,61 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] dual_step_size = np.empty(len(pb.blocks_h))
     cdef DOUBLE[:] norm2_columns_Ah = np.zeros(n)
     if h_present is True:
-        for ii in range(n):
-            for i in range(blocks[ii+1] - blocks[ii]):
-                coord = blocks[ii] + i
-                for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                    norm2_columns_Ah[ii] += Ah_data[l] ** 2
-        magnitude = np.maximum(
-            1. / np.sqrt(np.array(norm2_columns_Ah) + 1e-30),
-            np.array(Lf) / (np.array(norm2_columns_Ah) + 1e-30)) \
+        if algorithm == 'smart-cd' or algorithm == 's-pdhg' \
+               or algorithm == None:
+            for ii in range(n):
+                for i in range(blocks[ii+1] - blocks[ii]):
+                    coord = blocks[ii] + i
+                    for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                        norm2_columns_Ah[ii] += Ah_data[l] ** 2
+            magnitude = np.maximum(
+                1. / np.sqrt(np.array(norm2_columns_Ah) + 1e-30),
+                np.array(Lf) / (np.array(norm2_columns_Ah) + 1e-30)) \
                             * step_size_factor
-        magnitude = 1. / np.maximum(1e-30, np.max(magnitude))
-        tmp_Lf = np.empty(n)
-        if algorithm == 'smart-cd' or algorithm == None:
+            magnitude = 1. / np.maximum(1e-30, np.max(magnitude))
             beta0 = magnitude
-        elif algorithm == 'vu-condat-cd':
-            dual_step_size = magnitude * np.ones(len(pb.blocks_h))
+            if algorithm == 's-pdhg':
+                dual_step_size = magnitude / sqrt(n) * np.ones(len(pb.blocks_h))
+                primal_step_size = 0.9 / (dual_step_size[0] * n *
+                                              np.array(norm2_columns_Ah))
+        elif algorithm == 'vu-condat-cd' or algorithm == 's-tri-pd':
+            tmp_Lf = np.empty(n)
             for ii in range(n):
                 tmp_Lf[ii] = 0
                 for i in range(blocks[ii+1] - blocks[ii]):
                     coord = blocks[ii] + i
                     for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                         tmp_Lf[ii] += Ah_data[l] ** 2 \
-                            * dual_step_size[inv_blocks_h[Ah_indices[l]]] \
-                            * Ah_nnz_perrow[Ah_indices[l]]
+                          * Ah_nnz_perrow[Ah_indices[l]]
+            magnitude = np.maximum(
+                1. / np.sqrt(np.array(tmp_Lf) + 1e-30),
+                np.array(Lf) / (np.array(tmp_Lf) + 1e-30)) \
+                            * step_size_factor
+            magnitude = np.maximum(1e-30, np.max(magnitude))
+            dual_step_size = magnitude * np.ones(len(pb.blocks_h))
+            if algorithm == 'vu-condat-cd':
+                tmp_Lf = np.empty(n)
+                for ii in range(n):
+                    tmp_Lf[ii] = 0
+                    for i in range(blocks[ii+1] - blocks[ii]):
+                        coord = blocks[ii] + i
+                        for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                            tmp_Lf[ii] += Ah_data[l] ** 2 \
+                              * dual_step_size[inv_blocks_h[Ah_indices[l]]] \
+                              * Ah_nnz_perrow[Ah_indices[l]]
+            elif algorithm == 's-tri-pd':
+                tmp_Lf = np.empty(n)
+                for ii in range(n):
+                    tmp_Lf[ii] = 0
+                    for i in range(blocks[ii+1] - blocks[ii]):
+                        coord = blocks[ii] + i
+                        for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                            tmp_Lf[ii] += Ah_data[l] ** 2 \
+                              * dual_step_size[inv_blocks_h[Ah_indices[l]]]
+                tmp_Lf = np.array(tmp_Lf) * np.array(theta_s_tri_pd)
             primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
-        elif algorithm == 's_tri_pd':
-            dual_step_size = magnitude * np.ones(len(pb.blocks_h))
-            for ii in range(n):
-                tmp_Lf[ii] = 0
-                for i in range(blocks[ii+1] - blocks[ii]):
-                    coord = blocks[ii] + i
-                    for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                        tmp_Lf[ii] += Ah_data[l] ** 2 \
-                            * dual_step_size[inv_blocks_h[Ah_indices[l]]]
-            primal_step_size = 0.9 / (Lf + np.array(tmp_Lf)*np.array(theta_s_tri_pd))
         else: raise Exception('Not implemented')
+            
     beta = beta0
 
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
@@ -641,6 +671,21 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x, &change_in_y)
+        elif algorithm == 's-pdhg':
+            one_step_s_pdhg( x, y, rhx, rhx_jj, rf, rQ,
+                    buff_x, buff_y, buff, x_ii, grad,
+                    blocks, blocks_f, blocks_h,
+                    Af_indptr, Af_indices, Af_data, cf, bf,
+                    Dg_data, cg, bg,
+                    Ah_indptr, Ah_indices, Ah_data,
+                    inv_blocks_f, inv_blocks_h, ch, bh,
+                    Q_indptr, Q_indices, Q_data,
+                    f, g, h, f_present, g_present, h_present,
+                    primal_step_size, dual_step_size,
+                    sampling_law, rand_r_state,
+                    active_set, n_active, 
+                    focus_set, n_focus, n, len(pb.h), per_pass,
+                    &change_in_x, &change_in_y)
             
         elapsed_time = time.time() - init_time
         if verbose > 0 or tolerance > 0:
@@ -700,6 +745,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                 for l in range(blocks_h[j+1]-blocks_h[j]):
                                     buff_y[l] = y_center[blocks_h[j]+l] \
                                       + rhx[blocks_h[j]+l] / beta
+                            elif algorithm == 's-pdhg':
+                                0  # nothing to do
                             else: raise Exception('Not implemented')
 
                             h[j](buff_y, buff,
@@ -797,12 +844,14 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     if algorithm == 'vu-condat-cd':
         pb.dual_sol = np.array(Sy).copy()
         pb.dual_sol_duplicated = np.array(y).copy()
-    elif algorithm == 'smart-cd' or algorithm == 's-tri-pd' or algorithm == None:
+    elif (algorithm == 'smart-cd' or algorithm == 's-tri-pd'
+              or algorithm == 's-pdhg' or algorithm == None):
         pb.dual_sol = np.array(prox_y).copy()
         pb.dual_sol_duplicated = np.zeros(pb.Ah.nnz, dtype=float)
-        for i in range(N):
-            for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
-                pb.dual_sol_duplicated[lh] = prox_y[Ah_indices[lh]]
+        if h_present is True:
+            for i in range(N):
+                for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
+                    pb.dual_sol_duplicated[lh] = prox_y[Ah_indices[lh]]
     else:
         raise Exception('Not implemented')
 

@@ -3,6 +3,7 @@
 
 # C definitions in algorithms.pxd
 import numpy as np
+from scipy import sparse
 from algorithms import find_dual_variables_to_update
 
 
@@ -208,15 +209,176 @@ cdef void one_step_s_tri_pd(DOUBLE[:] x,
                 change_in_x[0] += fabs(dxi)
 
         # update y
-        for i in range(nb_coord):
-            coord = blocks[ii] + i
-            for i in range(dual_vars_to_update[ii][0]):
-                jh = dual_vars_to_update[ii][1+i]
-                j = inv_blocks_h[jh]
-                dy = prox_y[jh] + dual_step_size[j] * theta_s_tri_pd[ii] * \
-                  (rhx[jh] - rhx_jj[jh]) - y[jh]
-                y[jh] += dy
-                change_in_y[0] += fabs(dy)
+        if h_present is True:
+            for i in range(nb_coord):
+                coord = blocks[ii] + i
+                for i in range(dual_vars_to_update[ii][0]):
+                    jh = dual_vars_to_update[ii][1+i]
+                    j = inv_blocks_h[jh]
+                    dy = prox_y[jh] + dual_step_size[j] \
+                      * theta_s_tri_pd[ii] * (rhx[jh] - rhx_jj[jh]) - y[jh]
+                    y[jh] += dy
+                    change_in_y[0] += fabs(dy)
 
     return
 
+# TODO:
+# - spdhg
+# - rpdbu
+
+
+cdef void one_step_s_pdhg(DOUBLE[:] x,
+        DOUBLE[:] y, DOUBLE[:] rhx,
+        DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
+        DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
+        DOUBLE[:] grad,
+        UINT32_t[:] blocks, UINT32_t[:] blocks_f, UINT32_t[:] blocks_h,
+        UINT32_t[:] Af_indptr, UINT32_t[:] Af_indices, DOUBLE[:] Af_data,
+        DOUBLE[:] cf, DOUBLE[:] bf,
+        DOUBLE[:] Dg_data, DOUBLE[:] cg, DOUBLE[:] bg,
+        UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices, DOUBLE[:] Ah_data,
+        UINT32_t[:] inv_blocks_f, UINT32_t[:] inv_blocks_h, 
+        DOUBLE[:] ch, DOUBLE[:] bh,
+        UINT32_t[:] Q_indptr, UINT32_t[:] Q_indices, DOUBLE[:] Q_data,
+        atom* f, atom* g, atom* h,
+        int f_present, int g_present, int h_present,
+        DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
+        int sampling_law, UINT32_t* rand_r_state,
+        UINT32_t[:] active_set, UINT32_t n_active, 
+        UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
+        UINT32_t nh, UINT32_t per_pass,
+        DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
+    # Algorithm developed by A. Chambolle, M.J. Ehrhardt, P. Richtárik
+    #   and C.B. Schönlieb
+    # In our notation and reversing primal and dual spaces, we solve:
+    #    min_x g(x) + h(Ax)
+    # using the algorithm:
+    #    i  in  {0, ..., n-1}
+    #    old_x_i = x_i
+    #    x_i = prox_{tau_i, g_i} (x_i - tau_i A.T y)
+    #    (the other entries are unchanged)
+    #    bar_x = x + n (x_i - old_x_i) e_i
+    #    y = prox_{sigma, h*} (y + sigma A bar_x)
+
+    cdef UINT32_t ii, i, coord, j, jh, l, lh, jj, j_prev
+    cdef UINT32_t nb_coord
+    cdef int focus_on_kink_or_not = 0
+    cdef DOUBLE dy, dxi
+    cdef DOUBLE rhy_i
+    if n_active == 0:
+        return
+    for f_iter in range(n * per_pass):
+        if sampling_law == 0:
+            ii = rand_int(n_active, rand_r_state)
+            ii = active_set[ii]
+        else:  # sampling_law == 1:
+            # probability 1/2 to focus on non-kink points
+            focus_on_kink_or_not = rand_int(2, rand_r_state)
+            if focus_on_kink_or_not == 0 or n_focus == 0:
+                ii = rand_int(n_active, rand_r_state)
+                ii = active_set[ii]
+            else:
+                ii = rand_int(n_focus, rand_r_state)
+                ii = focus_set[ii]  # focus_set is contained in active_set
+    
+        nb_coord = blocks[ii+1] - blocks[ii]
+
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            x_ii[i] = x[coord]
+
+            # Compute gradient of quadratic form and do gradient step
+            x[coord] -= primal_step_size[ii] * rQ[coord]
+
+            # Compute gradient of f and do gradient step
+            if f_present is True:
+                0  # this has not been analyzed
+            if h_present is True:
+                # compute rhy[i]
+                rhy_i = 0.
+                for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                    rhy_i += Ah_data[lh] * y[Ah_indices[lh]]
+                # update x[i]
+                x[coord] -= primal_step_size[ii] * rhy_i
+
+        # Apply prox of g
+        if g_present is True:
+            for i in range(nb_coord):
+                coord = blocks[ii] + i
+                buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
+            g[ii](buff_x, buff, nb_coord, PROX,
+                  cg[ii]*Dg_data[ii]*Dg_data[ii]*primal_step_size[ii],
+                  useless_param)
+            for i in range(nb_coord):
+                coord = blocks[ii] + i
+                x[coord] = (buff[i] + bg[coord]) / Dg_data[ii]
+
+        # Update residuals
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            if x_ii[i] != x[coord]:
+                dxi = x[coord] - x_ii[i]
+                for l in range(Q_indptr[coord], Q_indptr[coord+1]):
+                    0  # this has not been analyzed
+                if f_present is True:
+                    0  # this has not been analyzed
+                if h_present is True:
+                    for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                        jh = Ah_indices[lh]
+                        rhx[jh] += Ah_data[lh] * dxi
+                        # Compute Ah bar_x  knowing that rhx_jj was 
+                        #   initialized with the previous value of Ah x
+                        rhx_jj[jh] += (1 + n) * Ah_data[lh] * dxi
+                change_in_x[0] += fabs(dxi)
+
+        # Apply prox of h* in the whole dual space and update y
+        if h_present is True:
+            for j in range(nh):
+                for l in range(blocks_h[j+1]-blocks_h[j]):
+                    buff_y[l] = y[blocks_h[j]+l] \
+                            + rhx_jj[blocks_h[j]+l] * dual_step_size[j]
+                h[j](buff_y, buff,
+                         blocks_h[j+1]-blocks_h[j],
+                         PROX_CONJ,
+                         dual_step_size[j],
+                         ch[j])
+                for l in range(blocks_h[j+1]-blocks_h[j]):
+                    jh = blocks_h[j]+l
+                    dy = buff[l] - y[jh]
+                    y[jh] = buff[l]
+                    change_in_y[0] += fabs(dy)
+
+        # Set rhx_jj = rhx for the next iteration
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            if x_ii[i] != x[coord]:
+                dxi = x[coord] - x_ii[i]
+                for l in range(Q_indptr[coord], Q_indptr[coord+1]):
+                    0  # this has not been analyzed
+                if f_present is True:
+                    0  # this has not been analyzed
+                if h_present is True:
+                    for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                        jh = Ah_indices[lh]
+                        rhx_jj[jh] = rhx[jh]
+                change_in_x[0] += fabs(dxi)
+    return
+
+
+def transform_f_into_h(pb):
+    pb.h = pb.h + pb.f
+    if pb.h_present == True:
+        pb.Ah = sparse.vstack((pb.Ah, pb.Af), format="csc")
+        pb.y_init = np.concatenate((pb.y_init, np.zeros(pb.Af.shape[0])))
+    else:
+        pb.Ah = pb.Af
+        pb.y_init = np.zeros(pb.Af.shape[0])
+    pb.ch = np.concatenate((pb.ch, pb.cf))
+    pb.bh = np.concatenate((pb.bh, pb.bf))
+    pb.blocks_h = np.concatenate((pb.blocks_h,
+                    pb.blocks_f[1:]+pb.blocks_h[len(pb.blocks_h)-1]))
+    pb.f_present = False
+    if len(pb.h) > 0:
+        pb.h_present = True
+
+    return

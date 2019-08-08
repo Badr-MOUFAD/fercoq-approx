@@ -67,7 +67,7 @@ def smoothed_gap(pb, x, y):
 
 
     
-probs = [0, 8]
+probs = [8]
 
 for prob in probs:
     if prob == 0:
@@ -78,10 +78,10 @@ for prob in probs:
 
         g = ["abs", "abs"]
 
-
         pb_toy = cd_solver.Problem(N=2, f=f, Af=A, bf=bf, cf=cf, g=g)
 
-        cd_solver.coordinate_descent(pb_toy, max_iter=100, verbose=0.5, print_style='smoothed_gap', min_change_in_x=0.)
+        for algorithm in ['cd', 'approx', 's-tri-pd', 's-pdhg']:
+            cd_solver.coordinate_descent(pb_toy, max_iter=100, verbose=0.5, print_style='smoothed_gap', min_change_in_x=0., algorithm=algorithm)
 
     if (prob >= 1 and prob <= 4) or prob == 6 or prob == 11 or prob == 13:
         dataset = 'leukemia'
@@ -226,11 +226,11 @@ for prob in probs:
         print("dual SVM with intercept on RCV1")
 
         # data = svmlight_format.load_svmlight_file('/home/ofercoq/scikit_learn_data/mldata/rcv1_train.binary')
-        # data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
-        data = fetch_rcv1()
+        data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
+        # data = fetch_rcv1()
 
-        X = data.data.astype(np.float)
-        y = data.target.astype(np.float).ravel()
+        X = data['X'].astype(np.float)
+        y = data['y'].astype(np.float).ravel()
         
         C = 1. / X.shape[0]
         alpha = 0.25 / X.shape[0]
@@ -245,8 +245,8 @@ for prob in probs:
                                             h=["eq_const"],
                                             Ah=sp.csc_matrix(y)
                                                           )
-        
-        cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=300, verbose=2., print_style='smoothed_gap', step_size_factor=alpha/1000, sampling='kink_half')
+        for algorithm in ['vu-condat-cd', 'smart-cd', 's-tri-pd', 's-pdhg']:
+            cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=300, verbose=2., print_style='smoothed_gap', step_size_factor=alpha, sampling='kink_half', algorithm=algorithm)
 
     if prob == 8:
         print("TV regularized least squares on toy dataset")
@@ -290,12 +290,11 @@ for prob in probs:
                                         Ah=alpha*threeDgradient
                                         )
 
-        pb_toy_tvl1_smartcd = copy.copy(pb_toy_tvl1)
-        
-        cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=1000000, verbose=0.1, max_time=2., print_style='smoothed_gap', tolerance=1e-19)
-
-        print("TV regularized least squares on toy dataset by SMART-CD")
-        cd_solver.coordinate_descent(pb_toy_tvl1_smartcd, max_iter=1000000, verbose=0.1, max_time=2., print_style='smoothed_gap', algorithm='smart-cd', tolerance=1e-19)
+        for algorithm in ['vu-condat-cd', 'smart-cd', 's-tri-pd', 's-pdhg']:
+            print("TV regularized least squares on toy dataset by %s" %algorithm)
+            cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=1000000,
+                    verbose=0.5, max_time=2., print_style='smoothed_gap',
+                    tolerance=1e-19, algorithm=algorithm)
 
     if prob == 9:
         try:

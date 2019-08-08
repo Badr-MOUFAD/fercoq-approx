@@ -35,3 +35,27 @@ cdef void one_step_s_tri_pd(DOUBLE[:] x,
         UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
         UINT32_t per_pass,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil
+
+
+cdef void one_step_s_pdhg(DOUBLE[:] x,
+        DOUBLE[:] y, DOUBLE[:] rhx,
+        DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
+        DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
+        DOUBLE[:] grad,
+        UINT32_t[:] blocks, UINT32_t[:] blocks_f, UINT32_t[:] blocks_h,
+        UINT32_t[:] Af_indptr, UINT32_t[:] Af_indices, DOUBLE[:] Af_data,
+        DOUBLE[:] cf, DOUBLE[:] bf,
+        DOUBLE[:] Dg_data, DOUBLE[:] cg, DOUBLE[:] bg,
+        UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices, DOUBLE[:] Ah_data,
+        UINT32_t[:] inv_blocks_f, UINT32_t[:] inv_blocks_h, 
+        DOUBLE[:] ch, DOUBLE[:] bh,
+        UINT32_t[:] Q_indptr, UINT32_t[:] Q_indices, DOUBLE[:] Q_data,
+        atom* f, atom* g, atom* h,
+        int f_present, int g_present, int h_present,
+        DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
+        int sampling_law, UINT32_t* rand_r_state,
+        UINT32_t[:] active_set, UINT32_t n_active, 
+        UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
+        UINT32_t nh, UINT32_t per_pass,
+        DOUBLE* change_in_x, DOUBLE* change_in_y) nogil
+
