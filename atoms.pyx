@@ -257,7 +257,15 @@ cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented(log1pexp, x, buff, nb_coord)
+        # val_conj_not_implemented(log1pexp, x, buff, nb_coord)
+        for i in range(nb_coord):
+            if x[i] < 0 or x[i] > 1.:
+                val += INF
+            elif x[i] == 0 or x[i] == 1.:
+                val += 0.
+            else:
+                val += x[i] * log(x[i]) + (1.-x[i]) * log(1.-x[i])
+        return val
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 30.:

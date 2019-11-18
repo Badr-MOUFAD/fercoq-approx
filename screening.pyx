@@ -147,6 +147,7 @@ cdef DOUBLE polar_support_dual_domain(atom func, DOUBLE[:] x,
     # code for no more kink point
     return -1.
 
+
 cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
                              UINT32_t n_active,
                              UINT32_t[:] active_set, pb, atom* g,
@@ -163,9 +164,13 @@ cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
                            / (pb.cg[ii] * pb.Dg.data[0][ii])
         scaling = fmax(scaling, norm_dom_g_i)
 
-    z = np.array(z) / scaling
-    AfTz = np.array(AfTz) / scaling
-    w = np.array(w) / scaling
+    for i in range(len(np.array(z))):
+        z[i] /= scaling
+    for i in range(len(np.array(AfTz))):
+        AfTz[i] /= scaling
+    for i in range(len(np.array(w))):
+        w[i] /= scaling
+    
     return scaling
 
 
@@ -183,26 +188,19 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
     cdef UINT32_t i, ii, iii, l, j, kink_number, coord, nb_coord
     cdef UINT32_t n_active = n_active_prev
     cdef DOUBLE beta = 0.
-    cdef DOUBLE gamma = 0.
+    cdef DOUBLE gamma = 1. / INF
     cdef DOUBLE[:] w = np.array(rQ).copy()
 
     cdef DOUBLE scaling = dual_scaling(z, AfTz, w, n_active,
                                            active_set, pb, g, buff_x)
 
-    z = np.array(z) / scaling
-    AfTz = np.array(AfTz) / scaling
-    w = np.array(w) / scaling
-
     # Scale dual vector and compute duality gap
     gap = compute_smoothed_gap(pb, f, g, h, x,
                                    rf, rhx, rQ, prox_y, z, AfTz, w,
                                    buff_x, buff_y, buff,
-                                   &beta, &gamma, compute_z=False)
+                                   &beta, &gamma, compute_z=False,
+                                   compute_gamma=False)
 
-    if gamma > 1e2 / INF:
-        print('Warning in gap safe screening: dual vector is not feasible',
-                  gamma)
-    
     # Screen
     iii = 0
     while iii < n_active:

@@ -67,7 +67,7 @@ def smoothed_gap(pb, x, y):
 
 
     
-probs = [8]
+probs = [13]
 
 for prob in probs:
     if prob == 0:
@@ -433,4 +433,4 @@ for prob in probs:
                                                g=["abs"] * X.shape[1],
                                                cg=[0.5*np.linalg.norm(X.T.dot(0.5 - (1+y)/2.),np.inf)] * X.shape[1])
 
-        cd_solver.coordinate_descent(pb_leukemia_sparse_logreg, max_iter=150, verbose=2., print_style='smoothed_gap')
+        cd_solver.coordinate_descent(pb_leukemia_sparse_logreg, max_iter=150, verbose=2., print_style='gap', screening='gapsafe', min_change_in_x=0, tolerance=1e-12)

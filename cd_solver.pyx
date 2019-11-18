@@ -390,7 +390,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         # Just a convenient alias since y does not have any
         #    duplicate in this case
     cdef DOUBLE[:] rQ = pb.Q.dot(x)
-    cdef DOUBLE[:] w
+    cdef DOUBLE[:] w = rQ.copy()
 
     # Arrays for accelerated version
     cdef DOUBLE[:] xe
@@ -619,12 +619,12 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                               "\tchange in x\tchange in y")
         elif print_style == 'gap':
                 print("elapsed time\titer\tfunction value infeasibility"
-                              "\tgap \tbeta     gamma  "
-                              "\tchange in x\tchange in y")
+                              "\tgap\t\tchange in x\tchange in y")
         else:
             print("print_style "+print_style+" not recognised.")
 
 
+    print_restart = 0
     nb_prints = 0
 
     # code in the case blocks_g = blocks only for the moment
@@ -710,6 +710,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     or elapsed_time > max_time
                     or iter >= max_iter-1):
                 print_time = True
+                if print_restart > 1:
+                    print(str(print_restart)+" restarts have been done.")
+                    print_restart = 0
                 nb_prints += 1
             else:
                 print_time = False
@@ -799,20 +802,24 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                   "beta=%.5e, gamma=%.5e"
                                   %(smoothed_gap, beta_print, gamma_print))
                         break
-                elif print_style == 'gap':
+                if print_style == 'gap' and print_time == True:
                     # Scale dual vector and compute duality gap
-                    w = np.array(rQ).copy()
+                    compute_smoothed_gap(pb, f, g, h, x,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w,
+                                   buff_x, buff_y, buff,
+                                   &beta_print, &gamma_print, compute_z=True)
                     scaling = dual_scaling(z, AfTz, w, n_active,
                                                active_set, pb, g, buff_x)
-
+                    beta_print = 0.
+                    gamma_print = 1. / INF
                     gap = compute_smoothed_gap(pb, f, g, h, x,
                                    rf, rhx, rQ, prox_y, z, AfTz, w,
                                    buff_x, buff_y, buff,
-                                   &beta_print, &gamma_print, compute_z=False)
-                    print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
+                                   &beta_print, &gamma_print, compute_z=False,
+                                   compute_gamma=False)
+                    print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.5e\t%.5e"
                               %(elapsed_time, iter, primal_val, infeas,
-                                gap, beta_print, gamma_print,
-                                change_in_x, change_in_y))
+                                gap, change_in_x, change_in_y))
 
                 iter_last_check = iter
 
@@ -834,8 +841,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             do_restart, next_period = variable_restart(restart_history,
                                         iter - offset, restart_period, next_period)
             if do_restart is True:
-                if verbose>0:
-                    print('restart')
+                if verbose > 0:
+                    print_restart += 1
                 xe = np.array(xe) + c_theta * np.array(xc)
                 rfe = np.array(rfe) + c_theta * np.array(rfc)
                 rQe = np.array(rQe) + c_theta * np.array(rQc)
