@@ -21,7 +21,8 @@ from algorithms cimport one_step_accelerated_coordinate_descent
 from algorithms cimport RAND_R_MAX
 from algorithms_stripd cimport one_step_s_tri_pd
 from algorithms_stripd cimport one_step_s_pdhg
-from screening cimport polar_matrix_norm, do_gap_safe_screening, update_focus_set
+from screening cimport polar_matrix_norm, do_gap_safe_screening
+from screening cimport update_focus_set, dual_scaling
 
 from algorithms import find_dual_variables_to_update, variable_restart
 from algorithms_stripd import compute_theta_s_tri_pd, transform_f_into_h
@@ -56,6 +57,9 @@ class Problem:
             self.blocks = np.array(blocks, dtype=np.uint32)
             if x_init is None:
                   self.x_init = np.zeros(N)
+            else:
+                  self.x_init = x_init
+
                   
             if f is not None:
                   self.f_present = True
@@ -386,6 +390,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         # Just a convenient alias since y does not have any
         #    duplicate in this case
     cdef DOUBLE[:] rQ = pb.Q.dot(x)
+    cdef DOUBLE[:] w
 
     # Arrays for accelerated version
     cdef DOUBLE[:] xe
@@ -535,6 +540,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef UINT32_t[:] active_set = np.arange(n, dtype=np.uint32)
     cdef DOUBLE[:] z = np.zeros(pb.Af.shape[0])  # useful for screening
     cdef DOUBLE[:] AfTz = np.zeros(N)  # useful for screening
+    if print_style == 'gap' and h_present is True:
+        print('The duality gap may be always infinite when h is '
+                  'present, switching to smoothed gap')
+        print_style = 'smoothed_gap'
     if screening == 'gapsafe' and h_present is True:
         print('Gap safe screening not analyzed when h is present, '
                   'we are deactivating it.')
@@ -608,10 +617,17 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 print("elapsed time\titer\tfunction value infeasibility"
                               "\tsmoothed gap \tbeta     gamma  "
                               "\tchange in x\tchange in y")
+        elif print_style == 'gap':
+                print("elapsed time\titer\tfunction value infeasibility"
+                              "\tgap \tbeta     gamma  "
+                              "\tchange in x\tchange in y")
+        else:
+            print("print_style "+print_style+" not recognised.")
+
 
     nb_prints = 0
 
-    # code in the case bloks_g = blocks only for the moment
+    # code in the case blocks_g = blocks only for the moment
     for iter in range(0, max_iter, per_pass):
         if callback is not None:
             if callback(x, Sy, rf, rhx): break
@@ -712,6 +728,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     if h_present is True:
                         for l in range(blocks_h[len_pb_h]):
                             rhx[l] = rhxe[l] + c_theta * rhxc[l]
+                    if Q_present is True:
+                        for i in range(N):
+                            rQ[i] = rQe[i] + c_theta * rQc[i]
                             
                 compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
                                          buff_x, buff_y, buff,
@@ -780,15 +799,33 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                   "beta=%.5e, gamma=%.5e"
                                   %(smoothed_gap, beta_print, gamma_print))
                         break
+                elif print_style == 'gap':
+                    # Scale dual vector and compute duality gap
+                    w = np.array(rQ).copy()
+                    scaling = dual_scaling(z, AfTz, w, n_active,
+                                               active_set, pb, g, buff_x)
+
+                    gap = compute_smoothed_gap(pb, f, g, h, x,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w,
+                                   buff_x, buff_y, buff,
+                                   &beta_print, &gamma_print, compute_z=False)
+                    print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
+                              %(elapsed_time, iter, primal_val, infeas,
+                                gap, beta_print, gamma_print,
+                                change_in_x, change_in_y))
+
                 iter_last_check = iter
 
         if screening == 'gapsafe' and iter == iter_last_check:
             # AfTz was computed just before when checking tolerance or printing
+            n_active_ = n_active
             n_active = do_gap_safe_screening(active_set, n_active,
                               pb, f, g, h, Lf,
                               x, rf, rhx, rQ, prox_y, z, AfTz,
                               xe, xc, rfe, rfc, rQe, rQc, buff_x, buff_y, buff,
                               g_norms_Af, norms_Af, max_Lf, algorithm=='smart-cd')
+            if (n_active < n_active_ and verbose>0):
+                print("screening: ", n_active, " active variables")
         if sampling_law == 1 and g_present is True:
             n_focus = update_focus_set(focus_set, n_active, active_set,
                                            g, pb, x, buff_x, buff)
@@ -797,6 +834,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             do_restart, next_period = variable_restart(restart_history,
                                         iter - offset, restart_period, next_period)
             if do_restart is True:
+                if verbose>0:
+                    print('restart')
                 xe = np.array(xe) + c_theta * np.array(xc)
                 rfe = np.array(rfe) + c_theta * np.array(rfc)
                 rQe = np.array(rQe) + c_theta * np.array(rQc)

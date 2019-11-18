@@ -147,6 +147,28 @@ cdef DOUBLE polar_support_dual_domain(atom func, DOUBLE[:] x,
     # code for no more kink point
     return -1.
 
+cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
+                             UINT32_t n_active,
+                             UINT32_t[:] active_set, pb, atom* g,
+                             DOUBLE[:] buff_x):
+    cdef UINT32_t i, ii, iii, coord, nb_coord
+    cdef DOUBLE scaling = 1.
+    for iii in range(n_active):
+        ii = active_set[iii]
+        nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
+        for i in range(nb_coord):
+            coord = pb.blocks[ii] + i
+            buff_x[i] = AfTz[coord] + w[coord]
+        norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
+                           / (pb.cg[ii] * pb.Dg.data[0][ii])
+        scaling = fmax(scaling, norm_dom_g_i)
+
+    z = np.array(z) / scaling
+    AfTz = np.array(AfTz) / scaling
+    w = np.array(w) / scaling
+    return scaling
+
+
 
 cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
                               UINT32_t n_active_prev, pb,
@@ -164,16 +186,8 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
     cdef DOUBLE gamma = 0.
     cdef DOUBLE[:] w = np.array(rQ).copy()
 
-    cdef DOUBLE scaling = 1.
-    for iii in range(n_active):
-        ii = active_set[iii]
-        nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
-        for i in range(nb_coord):
-            coord = pb.blocks[ii] + i
-            buff_x[i] = AfTz[coord] + w[coord]
-        norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
-                           / (pb.cg[ii] * pb.Dg.data[0][ii])
-        scaling = fmax(scaling, norm_dom_g_i)
+    cdef DOUBLE scaling = dual_scaling(z, AfTz, w, n_active,
+                                           active_set, pb, g, buff_x)
 
     z = np.array(z) / scaling
     AfTz = np.array(AfTz) / scaling

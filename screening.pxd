@@ -11,6 +11,12 @@ cdef DOUBLE polar_matrix_norm(atom func, UINT32_t* Af_indptr,
                                   DOUBLE[:] Af_data, DOUBLE Qii,
 				  UINT32_t kink_number)
 
+cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
+                              UINT32_t n_active,
+                              UINT32_t[:] active_set, pb, atom* g,
+                              DOUBLE[:] buff_x)
+
+
 cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
                               UINT32_t n_active_prev, pb,
                               atom* f, atom* g, atom* h, DOUBLE[:] Lf, 

@@ -428,7 +428,7 @@ for prob in probs:
         pb_leukemia_sparse_logreg = cd_solver.Problem(N=X.shape[1],
                                                f=["log1pexp"] * X.shape[0],
                                                Af=(X.T.multiply(y)).T,
-                                               bf=y,
+                                               bf=np.zeros(X.shape[0]),
                                                cf=[1] * X.shape[0],
                                                g=["abs"] * X.shape[1],
                                                cg=[0.5*np.linalg.norm(X.T.dot(0.5 - (1+y)/2.),np.inf)] * X.shape[1])
