@@ -600,6 +600,11 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     else:
         compute_gamma = False
         gamma_print = gamma_print_
+
+    cdef DOUBLE[:] x_backup = x.copy()
+    cdef DOUBLE val_backup
+    compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
+                             buff_x, buff_y, buff, &val_backup, &infeas)
     
     #----------------------- Main loop ----------------------------#
     init_time = time.time()
@@ -869,6 +874,22 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 beta = beta0
                 c_theta = 1.
                 offset = iter
+                ## if h_present is False:
+                ##     val = 0.
+                ##     compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
+                ##              buff_x, buff_y, buff, &val, &infeas)
+                ##     if val > val_backup:
+                ##         print('Function value has increased: backup')
+                ##         x = np.array(x_backup).copy()
+                ##         xe = np.array(x).copy()
+                ##         xc = 0 * np.array(xe)
+                ##         rfe = pb.Af.dot(np.array(xe)) - pb.bf
+                ##         rQe = pb.Q.dot(np.array(xe))
+                ##         rfc = 0 * np.array(rfe)
+                ##         rQc = 0 * np.array(rQe)
+                ##     else:
+                ##         val_backup = val
+                ##         x_backup = np.array(xe).copy()
 
         if verbose != 0 and iter >= max_iter - per_pass:
             print("Maximum number of iterations reached: stopping the algorithm "

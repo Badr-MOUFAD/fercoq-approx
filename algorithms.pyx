@@ -387,7 +387,6 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                         j = Af_indices[l]
                         rfe[j] += Af_data[l] * dxei
                         rfc[j] += Af_data[l] * dxci
-
                 if h_present is True:
                     for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                         jh = Ah_indices[lh]

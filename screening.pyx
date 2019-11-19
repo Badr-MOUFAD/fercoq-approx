@@ -159,7 +159,7 @@ cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
         nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
         for i in range(nb_coord):
             coord = pb.blocks[ii] + i
-            buff_x[i] = AfTz[coord] + w[coord]
+            buff_x[i] = -AfTz[coord] - w[coord]
         norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
                            / (pb.cg[ii] * pb.Dg.data[0][ii])
         scaling = fmax(scaling, norm_dom_g_i)
