@@ -11,7 +11,10 @@ cdef DOUBLE INF = 1e20
 
 cdef atom string_to_func(bytes func_string):
     if func_string[0] == 's':
-        return square
+        if func_string[1] == 'q':
+            return square
+        elif func_string[1] == 'o' or func_string[1] == 'e':
+            return second_order_cone
     elif func_string[0] == 'a':
         return abs
     elif func_string[0] == 'n':
@@ -22,7 +25,7 @@ cdef atom string_to_func(bytes func_string):
         elif func_string[1] == 'o':
             if func_string[3] == '1':
                 return log1pexp
-            if func_string[3] == 's':
+            elif func_string[3] == 's':
                 return logsumexp
     elif func_string[0] == 'b':
         return box_zero_one
@@ -32,8 +35,8 @@ cdef atom string_to_func(bytes func_string):
         return ineq_const
     elif func_string[0] == 'z':
         return zero
-    else:
-        return error_atom  # error
+    # else:
+    return error_atom  # error
 
 
 cdef DOUBLE val_conj_not_implemented(atom func,
@@ -412,6 +415,56 @@ cdef DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOU
             if x[i] < 0:
                 val += INF
         return val
+
+    
+cdef DOUBLE second_order_cone(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil:
+    # Function x[0] >= ||x[1:]||
+    # the dimension of the space on which we compute the norm is given by nb_coord - 1
+    cdef int i
+    cdef DOUBLE norm = 0.
+    for i in range(1, nb_coord):
+        norm += x[i] ** 2
+    norm = sqrt(norm)
+
+    if mode == GRAD:
+        for i in range(nb_coord):
+            buff[i] = 0.
+        return buff[0]
+    elif mode == PROX:
+        if x[0] >= norm:
+            for i in range(nb_coord):
+                buff[i] = x[i]
+        elif x[0] <= - norm:
+            for i in range(nb_coord):
+                buff[i] = 0.
+        else:
+            buff[0] = (x[0] + norm) / 2.
+            for i in range(1, nb_coord):
+                buff[i] = 0.5 * (1. + x[0] / norm) * x[i]
+        return buff[0]
+    elif mode == PROX_CONJ:
+        # I_{SOC}^*(t,s) = I_{SOC}(-t,-s) = I_{SOC}(-t,s)
+        x[0] = -x[0]
+        second_order_cone(x, buff, nb_coord, PROX, useless_param, useless_param)
+        x[0] = -x[0]
+        buff[0] = -buff[0]
+        return buff[0]
+    elif mode == LIPSCHITZ:
+        buff[0] = INF
+        return buff[0]
+    elif mode == IS_KINK:
+        return 0
+    elif mode == VAL_CONJ:
+        # I_{SOC}^*(t,s) = I_{SOC}(-t,-s)
+        if norm <= -x[0]:
+            return 0
+        else:
+            return INF
+    else:  # mode == VAL
+        if norm <= x[0]:
+            return 0
+        else:
+            return INF
 
     
 cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil:

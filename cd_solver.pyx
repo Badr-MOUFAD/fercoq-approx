@@ -35,12 +35,12 @@ class Problem:
       # min_x sum_j cf[j] * f_j (Af[j] x - bf[j])
       # 	      	    + cg * g (Dg x - bg) + ch * h (Ah x - bh)
       
-      def __init__(self, N, blocks=None, x_init=None, y_init=None,
+      def __init__(self, N=None, blocks=None, x_init=None, y_init=None,
                          f=None, cf=None, Af=None, bf=None, blocks_f=None,
                          g=None, cg=None, Dg=None, bg=None,
                          h=None, ch=None, Ah=None, bh=None, blocks_h=None,
                          h_takes_infinite_values=None,
-                         Q=None):
+                         Q=None, input_problem=None):
             # N is the number of variables
             # blocks codes all blocks. It starts with 0 and terminates with N.
             # The default is N block of size 1.
@@ -50,6 +50,28 @@ class Problem:
             #
             # The rest of the parameters are arrays and matrices
             # We only allow blocks_g to be equal to blocks (for easier implementation)
+
+            if input_problem is not None:
+                  N=input_problem.N
+                  blocks=input_problem.blocks
+                  x_init=input_problem.x_init
+                  y_init=input_problem.y_init
+                  f=input_problem.f
+                  cf=input_problem.cf
+                  Af=input_problem.Af
+                  bf=input_problem.bf
+                  blocks_f=input_problem.blocks_f
+                  g=input_problem.g
+                  cg=input_problem.cg
+                  Dg=input_problem.Dg
+                  bg=input_problem.bg
+                  h=input_problem.h
+                  ch=input_problem.ch
+                  Ah=input_problem.Ah
+                  bh=input_problem.bh
+                  blocks_h=input_problem.blocks_h
+                  h_takes_infinite_values=input_problem.h_takes_infinite_values
+                  Q=input_problem.Q
 
             self.N = N
             if blocks is None:
@@ -61,7 +83,7 @@ class Problem:
                   self.x_init = x_init
 
                   
-            if f is not None:
+            if f is not None and len(f) > 0:
                   self.f_present = True
                   if cf is None:
                         cf = np.ones(len(f))
@@ -85,7 +107,7 @@ class Problem:
             if len(blocks_f) != len(f) + 1 or blocks_f[-1] != Af.shape[0]:
                   raise Warning("blocks_f seems to be ill defined.")
             
-            if g is not None:
+            if g is not None and len(g) > 0:
                   self.g_present = True
                   if len(g) != len(self.blocks) - 1:
                         raise Warning("blocks for g and x should match.")
@@ -109,7 +131,7 @@ class Problem:
                 cg = bg = np.empty(0)
                 Dg = 0 * sparse.eye(1)
 
-            if h is not None:
+            if h is not None and len(h) > 0:
                   self.h_present = True
                   if ch is None:
                         ch = np.ones(len(h))
@@ -165,7 +187,7 @@ class Problem:
             self.Ah = sparse.csc_matrix(Ah)
             self.bh = np.array(bh, dtype=float)
             self.blocks_h = np.array(blocks_h, dtype=np.uint32)
-            if y_init == None:
+            if y_init is None:
                   y_init = np.zeros(self.Ah.shape[0])
             self.y_init = y_init
             self.h_takes_infinite_values = h_takes_infinite_values
@@ -609,6 +631,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     #----------------------- Main loop ----------------------------#
     init_time = time.time()
     if verbose > 0:
+        pb.print_style = print_style
+        pb.printed_values = []
         if print_style == 'classical':
             if h_present is True and h_takes_infinite_values is False:
                 print("elapsed time \t iter \t function value  "
@@ -752,9 +776,14 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         print("%.5f \t %d \t %+.5e \t %.5e \t %.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, infeas,
                                         change_in_x, change_in_y))
+                        pb.printed_values.append([elapsed_time, iter,
+                                        primal_val, infeas,
+                                        change_in_x, change_in_y])
                     else:  # h_present is False
                         print("%.5f \t %d \t %+.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, change_in_x))
+                        pb.printed_values.append([elapsed_time, iter,
+                                                      primal_val, change_in_x])
                 elif print_style == 'smoothed_gap' or tolerance > 0:
                     # When we print, we check
                     if h_present is True:
@@ -800,6 +829,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                               %(elapsed_time, iter, primal_val, infeas,
                                 smoothed_gap, beta_print, gamma_print,
                                 change_in_x, change_in_y))
+                        pb.printed_values.append([elapsed_time, iter,
+                                primal_val, infeas,
+                                smoothed_gap, beta_print, gamma_print,
+                                change_in_x, change_in_y])
                     if smoothed_gap < tolerance and beta_print < tolerance \
                            and gamma_print < tolerance:
                         print("Target tolerance reached: stopping "
@@ -825,6 +858,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.5e\t%.5e"
                               %(elapsed_time, iter, primal_val, infeas,
                                 gap, change_in_x, change_in_y))
+                    pb.printed_values.append([elapsed_time, iter, primal_val,
+                                infeas, gap, change_in_x, change_in_y])
 
                 iter_last_check = iter
 
