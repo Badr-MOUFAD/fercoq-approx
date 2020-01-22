@@ -82,7 +82,6 @@ class Problem:
             else:
                   self.x_init = x_init
 
-                  
             if f is not None and len(f) > 0:
                   self.f_present = True
                   if cf is None:

@@ -128,7 +128,7 @@ cdef DOUBLE polar_support_kink(atom func, DOUBLE[:] x,
 
 
 cdef DOUBLE polar_support_dual_domain(atom func, DOUBLE[:] x,
-                                          UINT32_t nb_coord):
+                                          UINT32_t nb_coord) nogil:
     # polar support function of the domain of g*
     cdef DOUBLE val
     cdef UINT32_t i
@@ -144,7 +144,7 @@ cdef DOUBLE polar_support_dual_domain(atom func, DOUBLE[:] x,
        return sqrt(val)
     if func == box_zero_one:
         return 0.
-    # code for no more kink point
+    # error code for not implemented
     return -1.
 
 
@@ -154,6 +154,7 @@ cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
                              DOUBLE[:] buff_x):
     cdef UINT32_t i, ii, iii, coord, nb_coord
     cdef DOUBLE scaling = 1.
+    cdef int raise_not_implemented_warning = 0
     for iii in range(n_active):
         ii = active_set[iii]
         nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
@@ -161,16 +162,25 @@ cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
             coord = pb.blocks[ii] + i
             buff_x[i] = -AfTz[coord] - w[coord]
         norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
-                           / (pb.cg[ii] * pb.Dg.data[0][ii])
+                           / (pb.cg[ii] * fabs(pb.Dg.data[0][ii]))  # fabs missing in the cd_solver paper
         scaling = fmax(scaling, norm_dom_g_i)
+        if norm_dom_g_i < 0:
+            raise_not_implemented_warning = 1
+            break
 
-    for i in range(len(np.array(z))):
-        z[i] /= scaling
-    for i in range(len(np.array(AfTz))):
-        AfTz[i] /= scaling
-    for i in range(len(np.array(w))):
-        w[i] /= scaling
-    
+    if raise_not_implemented_warning:
+        print('polar_support_dual_domain not implemented for at least '
+                          'one of the atoms: dual scaling skipped')
+        scaling = 1.
+
+    else:
+        for i in range(len(np.array(z))):
+            z[i] /= scaling
+        for i in range(len(np.array(AfTz))):
+            AfTz[i] /= scaling
+        for i in range(len(np.array(w))):
+            w[i] /= scaling
+
     return scaling
 
 

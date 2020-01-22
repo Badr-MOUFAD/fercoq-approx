@@ -192,7 +192,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             # compute g*_gamma(-AfTz - AhTSy;x)
             for i in range(nb_coord):
                 coord = blocks[ii] + i
-                buff_x[i] = Dg_data[ii] * xbar[coord] - bg[coord]
+                buff_x[i] = buff[i]  # = Dg_data[ii] * xbar[coord] - bg[coord]
             val_g1 -= cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
                                         useless_param, useless_param)
             for i in range(nb_coord):
