@@ -119,7 +119,7 @@ class Problem:
                   elif bh is None:
                         bh = np.zeros(Ah.shape[0])
                   if len(bh) != Ah.shape[0]:
-                        raise Warning("dimensions of Dh and bh do not match.")
+                        raise Warning("dimensions of Ah and bh do not match.")
                   if h_takes_infinite_values is None:
                       if (any([h[j] == 'eq_const' for j in range(len(h))]) or
                               any([h[j] == 'box_zero_one' for j in range(len(h))]) or
@@ -484,7 +484,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             magnitude = 1. / np.maximum(1e-30, np.max(magnitude))
             beta0 = magnitude
             if algorithm == 's-pdhg':
-                dual_step_size = magnitude / sqrt(n) * np.ones(len(pb.blocks_h))
+                dual_step_size = magnitude / n * np.ones(len(pb.blocks_h))
                 primal_step_size = 0.9 / (dual_step_size[0] * n *
                                               np.array(norm2_columns_Ah))
         elif algorithm == 'vu-condat-cd' or algorithm == 's-tri-pd':
