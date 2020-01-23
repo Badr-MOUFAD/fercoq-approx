@@ -8,10 +8,14 @@ import numpy as np
 
 
 cdef DOUBLE INF = 1e20
+cdef DOUBLE NEARLY_ONE = 1.00000001
 
 cdef atom string_to_func(bytes func_string):
     if func_string[0] == 's':
-        return square
+        if func_string[1] == 'q':
+            return square
+        elif func_string[1] == 'o' or func_string[1] == 'e':
+            return second_order_cone
     elif func_string[0] == 'a':
         return abs
     elif func_string[0] == 'n':
@@ -22,7 +26,7 @@ cdef atom string_to_func(bytes func_string):
         elif func_string[1] == 'o':
             if func_string[3] == '1':
                 return log1pexp
-            if func_string[3] == 's':
+            elif func_string[3] == 's':
                 return logsumexp
     elif func_string[0] == 'b':
         return box_zero_one
@@ -32,8 +36,8 @@ cdef atom string_to_func(bytes func_string):
         return ineq_const
     elif func_string[0] == 'z':
         return zero
-    else:
-        return error_atom  # error
+    # else:
+    return error_atom  # error
 
 
 cdef DOUBLE val_conj_not_implemented(atom func,
@@ -197,7 +201,7 @@ cdef DOUBLE norm2(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE p
                 return 0
         return 1
     elif mode == VAL_CONJ:
-        if val > 1.00000001:
+        if val > NEARLY_ONE:
             return INF
         return 0.
     else:  # mode == VAL
@@ -257,7 +261,15 @@ cdef DOUBLE log1pexp(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBL
     elif mode == IS_KINK:
         return 0
     elif mode == VAL_CONJ:
-        return val_conj_not_implemented(log1pexp, x, buff, nb_coord)
+        # val_conj_not_implemented(log1pexp, x, buff, nb_coord)
+        for i in range(nb_coord):
+            if x[i] < 0 or x[i] > 1.:
+                val += INF
+            elif x[i] == 0 or x[i] == 1.:
+                val += 0.
+            else:
+                val += x[i] * log(x[i]) + (1.-x[i]) * log(1.-x[i])
+        return val
     else:  # mode == VAL
         for i in range(nb_coord):
             if x[i] > 30.:
@@ -406,6 +418,59 @@ cdef DOUBLE ineq_const(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOU
         return val
 
     
+cdef DOUBLE second_order_cone(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil:
+    # Function x[0] >= ||x[1:]||
+    # the dimension of the space on which we compute the norm is given by nb_coord - 1
+    cdef int i
+    cdef DOUBLE norm = 0.
+    cdef DOUBLE new_norm
+    for i in range(1, nb_coord):
+        norm += x[i] ** 2
+    norm = sqrt(norm)
+
+    if mode == GRAD:
+        for i in range(nb_coord):
+            buff[i] = 0.
+        return buff[0]
+    elif mode == PROX:
+        if x[0] >= norm:
+            for i in range(nb_coord):
+                buff[i] = x[i]
+        elif x[0] <= - norm:
+            for i in range(nb_coord):
+                buff[i] = 0.
+        else:
+            new_norm = fmax(0., x[0] + norm) / 2.  # fmax is useless
+            buff[0] = new_norm
+            for i in range(1, nb_coord):
+                buff[i] = new_norm * (x[i] / norm)
+        return buff[0]
+    elif mode == PROX_CONJ:
+        # I_{SOC}^*(t,s) = I_{SOC}(-t,-s) = I_{SOC}(-t,s)
+        x[0] = -x[0]
+        second_order_cone(x, buff, nb_coord, PROX, useless_param, useless_param)
+        x[0] = -x[0]
+        buff[0] = -buff[0]
+        return buff[0]
+    elif mode == LIPSCHITZ:
+        buff[0] = INF
+        return buff[0]
+    elif mode == IS_KINK:
+        return 0
+    elif mode == VAL_CONJ:
+        # I_{SOC}^*(t,s) = I_{SOC}(-t,-s)
+        if norm <= -x[0] * NEARLY_ONE + 1. / INF:
+            return 0
+        else:
+            return INF
+    else:  # mode == VAL
+        # margin necessary because of the square root
+        if norm <= x[0] * NEARLY_ONE + 1. / INF:
+            return 0
+        else:
+            return INF
+
+    
 cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil:
     # Function x -> 0
     cdef int i
@@ -419,7 +484,10 @@ cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pr
             buff[i] = x[i]
         return buff[0]
     elif mode == PROX_CONJ:
-        return prox_conj(zero, x, buff, nb_coord, prox_param, prox_param2)
+        #return prox_conj(zero, x, buff, nb_coord, prox_param, prox_param2)
+        for i in range(nb_coord):
+            buff[i] = 0.
+        return buff[0]
     elif mode == LIPSCHITZ:
         buff[0] = 0.
         return buff[0]
@@ -429,7 +497,7 @@ cdef DOUBLE zero(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pr
         for i in range(nb_coord):
             if fabs(x[i]) > 1./INF:
                 val += INF
-            return val
+        return val
         # return val_conj_not_implemented(zero, x, buff, nb_coord)
     else:  # mode == VAL
         return 0.

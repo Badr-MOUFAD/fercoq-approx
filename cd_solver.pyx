@@ -21,7 +21,8 @@ from algorithms cimport one_step_accelerated_coordinate_descent
 from algorithms cimport RAND_R_MAX
 from algorithms_stripd cimport one_step_s_tri_pd
 from algorithms_stripd cimport one_step_s_pdhg
-from screening cimport polar_matrix_norm, do_gap_safe_screening, update_focus_set
+from screening cimport polar_matrix_norm, do_gap_safe_screening
+from screening cimport update_focus_set, dual_scaling
 
 from algorithms import find_dual_variables_to_update, variable_restart
 from algorithms_stripd import compute_theta_s_tri_pd, transform_f_into_h
@@ -34,12 +35,12 @@ class Problem:
       # min_x sum_j cf[j] * f_j (Af[j] x - bf[j])
       # 	      	    + cg * g (Dg x - bg) + ch * h (Ah x - bh)
       
-      def __init__(self, N, blocks=None, x_init=None, y_init=None,
+      def __init__(self, N=None, blocks=None, x_init=None, y_init=None,
                          f=None, cf=None, Af=None, bf=None, blocks_f=None,
                          g=None, cg=None, Dg=None, bg=None,
                          h=None, ch=None, Ah=None, bh=None, blocks_h=None,
                          h_takes_infinite_values=None,
-                         Q=None):
+                         Q=None, input_problem=None):
             # N is the number of variables
             # blocks codes all blocks. It starts with 0 and terminates with N.
             # The default is N block of size 1.
@@ -50,14 +51,38 @@ class Problem:
             # The rest of the parameters are arrays and matrices
             # We only allow blocks_g to be equal to blocks (for easier implementation)
 
+            if input_problem is not None:
+                  N=input_problem.N
+                  blocks=input_problem.blocks
+                  x_init=input_problem.x_init
+                  y_init=input_problem.y_init
+                  f=input_problem.f
+                  cf=input_problem.cf
+                  Af=input_problem.Af
+                  bf=input_problem.bf
+                  blocks_f=input_problem.blocks_f
+                  g=input_problem.g
+                  cg=input_problem.cg
+                  Dg=input_problem.Dg
+                  bg=input_problem.bg
+                  h=input_problem.h
+                  ch=input_problem.ch
+                  Ah=input_problem.Ah
+                  bh=input_problem.bh
+                  blocks_h=input_problem.blocks_h
+                  h_takes_infinite_values=input_problem.h_takes_infinite_values
+                  Q=input_problem.Q
+
             self.N = N
             if blocks is None:
                   blocks = np.arange(N+1, dtype=np.uint32)
             self.blocks = np.array(blocks, dtype=np.uint32)
             if x_init is None:
                   self.x_init = np.zeros(N)
-                  
-            if f is not None:
+            else:
+                  self.x_init = x_init
+
+            if f is not None and len(f) > 0:
                   self.f_present = True
                   if cf is None:
                         cf = np.ones(len(f))
@@ -81,7 +106,7 @@ class Problem:
             if len(blocks_f) != len(f) + 1 or blocks_f[-1] != Af.shape[0]:
                   raise Warning("blocks_f seems to be ill defined.")
             
-            if g is not None:
+            if g is not None and len(g) > 0:
                   self.g_present = True
                   if len(g) != len(self.blocks) - 1:
                         raise Warning("blocks for g and x should match.")
@@ -105,7 +130,7 @@ class Problem:
                 cg = bg = np.empty(0)
                 Dg = 0 * sparse.eye(1)
 
-            if h is not None:
+            if h is not None and len(h) > 0:
                   self.h_present = True
                   if ch is None:
                         ch = np.ones(len(h))
@@ -161,7 +186,7 @@ class Problem:
             self.Ah = sparse.csc_matrix(Ah)
             self.bh = np.array(bh, dtype=float)
             self.blocks_h = np.array(blocks_h, dtype=np.uint32)
-            if y_init == None:
+            if y_init is None:
                   y_init = np.zeros(self.Ah.shape[0])
             self.y_init = y_init
             self.h_takes_infinite_values = h_takes_infinite_values
@@ -386,6 +411,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         # Just a convenient alias since y does not have any
         #    duplicate in this case
     cdef DOUBLE[:] rQ = pb.Q.dot(x)
+    cdef DOUBLE[:] w = rQ.copy()
 
     # Arrays for accelerated version
     cdef DOUBLE[:] xe
@@ -535,6 +561,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef UINT32_t[:] active_set = np.arange(n, dtype=np.uint32)
     cdef DOUBLE[:] z = np.zeros(pb.Af.shape[0])  # useful for screening
     cdef DOUBLE[:] AfTz = np.zeros(N)  # useful for screening
+    if print_style == 'gap' and h_present is True:
+        print('The duality gap may be always infinite when h is '
+                  'present, switching to smoothed gap')
+        print_style = 'smoothed_gap'
     if screening == 'gapsafe' and h_present is True:
         print('Gap safe screening not analyzed when h is present, '
                   'we are deactivating it.')
@@ -591,10 +621,17 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     else:
         compute_gamma = False
         gamma_print = gamma_print_
+
+    cdef DOUBLE[:] x_backup = x.copy()
+    cdef DOUBLE val_backup
+    compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
+                             buff_x, buff_y, buff, &val_backup, &infeas)
     
     #----------------------- Main loop ----------------------------#
     init_time = time.time()
     if verbose > 0:
+        pb.print_style = print_style
+        pb.printed_values = []
         if print_style == 'classical':
             if h_present is True and h_takes_infinite_values is False:
                 print("elapsed time \t iter \t function value  "
@@ -608,10 +645,17 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 print("elapsed time\titer\tfunction value infeasibility"
                               "\tsmoothed gap \tbeta     gamma  "
                               "\tchange in x\tchange in y")
+        elif print_style == 'gap':
+                print("elapsed time\titer\tfunction value infeasibility"
+                              "\tgap\t\tchange in x\tchange in y")
+        else:
+            print("print_style "+print_style+" not recognised.")
 
+
+    print_restart = 0
     nb_prints = 0
 
-    # code in the case bloks_g = blocks only for the moment
+    # code in the case blocks_g = blocks only for the moment
     for iter in range(0, max_iter, per_pass):
         if callback is not None:
             if callback(x, Sy, rf, rhx): break
@@ -694,6 +738,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     or elapsed_time > max_time
                     or iter >= max_iter-1):
                 print_time = True
+                if print_restart > 1:
+                    print(str(print_restart)+" restarts have been done.")
+                    print_restart = 0
                 nb_prints += 1
             else:
                 print_time = False
@@ -712,6 +759,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     if h_present is True:
                         for l in range(blocks_h[len_pb_h]):
                             rhx[l] = rhxe[l] + c_theta * rhxc[l]
+                    if Q_present is True:
+                        for i in range(N):
+                            rQ[i] = rQe[i] + c_theta * rQc[i]
                             
                 compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
                                          buff_x, buff_y, buff,
@@ -725,9 +775,14 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         print("%.5f \t %d \t %+.5e \t %.5e \t %.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, infeas,
                                         change_in_x, change_in_y))
+                        pb.printed_values.append([elapsed_time, iter,
+                                        primal_val, infeas,
+                                        change_in_x, change_in_y])
                     else:  # h_present is False
                         print("%.5f \t %d \t %+.5e \t %.5e"
                                   %(elapsed_time, iter, primal_val, change_in_x))
+                        pb.printed_values.append([elapsed_time, iter,
+                                                      primal_val, change_in_x])
                 elif print_style == 'smoothed_gap' or tolerance > 0:
                     # When we print, we check
                     if h_present is True:
@@ -773,6 +828,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                               %(elapsed_time, iter, primal_val, infeas,
                                 smoothed_gap, beta_print, gamma_print,
                                 change_in_x, change_in_y))
+                        pb.printed_values.append([elapsed_time, iter,
+                                primal_val, infeas,
+                                smoothed_gap, beta_print, gamma_print,
+                                change_in_x, change_in_y])
                     if smoothed_gap < tolerance and beta_print < tolerance \
                            and gamma_print < tolerance:
                         print("Target tolerance reached: stopping "
@@ -780,15 +839,39 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                   "beta=%.5e, gamma=%.5e"
                                   %(smoothed_gap, beta_print, gamma_print))
                         break
+                if print_style == 'gap' and print_time == True:
+                    # Scale dual vector and compute duality gap
+                    compute_smoothed_gap(pb, f, g, h, x,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w,
+                                   buff_x, buff_y, buff,
+                                   &beta_print, &gamma_print, compute_z=True)
+                    scaling = dual_scaling(z, AfTz, w, n_active,
+                                               active_set, pb, g, buff_x)
+                    beta_print = 0.
+                    gamma_print = 1. / INF
+                    gap = compute_smoothed_gap(pb, f, g, h, x,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w,
+                                   buff_x, buff_y, buff,
+                                   &beta_print, &gamma_print, compute_z=False,
+                                   compute_gamma=False)
+                    print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.5e\t%.5e"
+                              %(elapsed_time, iter, primal_val, infeas,
+                                gap, change_in_x, change_in_y))
+                    pb.printed_values.append([elapsed_time, iter, primal_val,
+                                infeas, gap, change_in_x, change_in_y])
+
                 iter_last_check = iter
 
         if screening == 'gapsafe' and iter == iter_last_check:
             # AfTz was computed just before when checking tolerance or printing
+            n_active_ = n_active
             n_active = do_gap_safe_screening(active_set, n_active,
                               pb, f, g, h, Lf,
                               x, rf, rhx, rQ, prox_y, z, AfTz,
                               xe, xc, rfe, rfc, rQe, rQc, buff_x, buff_y, buff,
                               g_norms_Af, norms_Af, max_Lf, algorithm=='smart-cd')
+            if (n_active < n_active_ and verbose>0):
+                print("screening: ", n_active, " active variables")
         if sampling_law == 1 and g_present is True:
             n_focus = update_focus_set(focus_set, n_active, active_set,
                                            g, pb, x, buff_x, buff)
@@ -797,6 +880,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             do_restart, next_period = variable_restart(restart_history,
                                         iter - offset, restart_period, next_period)
             if do_restart is True:
+                if verbose > 0:
+                    print_restart += 1
                 xe = np.array(xe) + c_theta * np.array(xc)
                 rfe = np.array(rfe) + c_theta * np.array(rfc)
                 rQe = np.array(rQe) + c_theta * np.array(rQc)
@@ -823,6 +908,22 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 beta = beta0
                 c_theta = 1.
                 offset = iter
+                ## if h_present is False:
+                ##     val = 0.
+                ##     compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
+                ##              buff_x, buff_y, buff, &val, &infeas)
+                ##     if val > val_backup:
+                ##         print('Function value has increased: backup')
+                ##         x = np.array(x_backup).copy()
+                ##         xe = np.array(x).copy()
+                ##         xc = 0 * np.array(xe)
+                ##         rfe = pb.Af.dot(np.array(xe)) - pb.bf
+                ##         rQe = pb.Q.dot(np.array(xe))
+                ##         rfc = 0 * np.array(rfe)
+                ##         rQc = 0 * np.array(rQe)
+                ##     else:
+                ##         val_backup = val
+                ##         x_backup = np.array(xe).copy()
 
         if verbose != 0 and iter >= max_iter - per_pass:
             print("Maximum number of iterations reached: stopping the algorithm "

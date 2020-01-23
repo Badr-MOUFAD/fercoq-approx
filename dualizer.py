@@ -16,7 +16,9 @@ def fenchel(f):
     elif f == "zero":
         return ["eq_const", 1., 1., 0., 0.]
     elif f == "ineq_const":
-        return ["ineq_const", 1., -1, 0, 0]
+        return ["ineq_const", 1., -1, 0., 0.]
+    elif f == "second_order_cone":
+        return ["second_order_cone", 1., -1, 0., 0.]
     else:
         print("fenchel conjugate not implemented for " + f)
         return ["error_atom", 0., 0., 0., 0.]
@@ -36,8 +38,12 @@ def dualizer(pb_in):
 
     if norm(pb_in.bg) + norm(pb_in.bh) > 0:
         f = ["linear"]
-        Af = pb_in.bh - (pb_in.Ah.dot(pb_in.Dg.dot(pb_in.bg))).T
-        bf = [-np.sum(af_in * pb_in.Dg.dot(pb_in.bg))]
+        if pb_in.g_present == 0:
+            Af = pb_in.bh
+            bf = [0]
+        else:
+            Af = pb_in.bh - (pb_in.Ah.dot(pb_in.Dg.dot(pb_in.bg))).T
+            bf = [-np.sum(af_in * pb_in.Dg.dot(pb_in.bg))]
     else:
         f = None
         Af = pb_in.bh
@@ -59,6 +65,12 @@ def dualizer(pb_in):
             bg[i] *= a_fench
             bg[i] += b_fench
 
+    if pb_in.g_present == 0:
+        pb_in.g = ["zero"]
+        pb_in.blocks = np.array([0, pb_in.N])
+        pb_in.Dg = sp.eye(1)
+        pb_in.cg = [1]
+        pb_in.g_present = 1
     if pb_in.g_present == 1:
         ch = pb_in.cg.copy()
         blocks_h = pb_in.blocks.copy()
@@ -72,8 +84,9 @@ def dualizer(pb_in):
             Af += ch[k] * l_fench * \
                   np.array(np.sum(Ah[blocks_h[k]:blocks_h[k+1], :], axis=0)).ravel()
             ch[k] *= c_fench
-            Ah[blocks_h[k]:blocks_h[k+1], :] *= a_fench
-            bh[k] *= a_fench
+            if a_fench != 1:
+                Ah[blocks_h[k]:blocks_h[k+1], :] *= a_fench
+                bh[k] *= a_fench
             bh[k] += b_fench
 
         N = Ah.shape[1]  # this should be equal to blocks[-1]
