@@ -80,6 +80,8 @@ class Problem:
             if x_init is None:
                   self.x_init = np.zeros(N)
             else:
+                  if len(x_init) != N:
+                        raise Warning("x_init should have length N")
                   self.x_init = x_init
 
             if f is not None and len(f) > 0:
@@ -188,6 +190,9 @@ class Problem:
             self.blocks_h = np.array(blocks_h, dtype=np.uint32)
             if y_init is None:
                   y_init = np.zeros(self.Ah.shape[0])
+            elif len(y_init) != Ah.shape[0] and len(y_init) != len(Ah.data):
+                  print(len(y_init), Ah.shape[0])
+                  raise Warning("y_init does not have the good length")
             self.y_init = y_init
             self.h_takes_infinite_values = h_takes_infinite_values
             self.Q = Q
@@ -382,7 +387,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             
     else:
         dual_vars_to_update = np.empty((0,0), dtype=np.uint32)
-        
+
     # Definition of residuals
     cdef DOUBLE[:] rf
     if f_present is True:
@@ -480,7 +485,13 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         tmp_Lf[j] = cf[j] * f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
                          LIPSCHITZ, useless_param, useless_param)
         max_Lf = fmax(max_Lf, tmp_Lf[j])
-    cdef DOUBLE[:] Lf = np.abs(pb.Q.diagonal()) + 1e-30 * np.ones(N)
+    cdef DOUBLE[:] Lf
+    if N == n:
+        Lf = np.abs(pb.Q.diagonal()) + 1e-30 * np.ones(N)
+    elif Q_present == False:
+        Lf = 1e-30 * np.ones(n)
+    else:
+        raise Exception('Nonzero Q and blocks together not implemented')
     if f_present is True:
         for ii in range(n):
             # if block size is > 1, we use the inequality frobenius norm > 2-norm
