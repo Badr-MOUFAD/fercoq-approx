@@ -1,6 +1,7 @@
 import cd_solver
 import scipy.sparse as sp
 import numpy as np
+import copy
 norm = np.linalg.norm
 
 def fenchel(f):
@@ -24,7 +25,8 @@ def fenchel(f):
         return ["error_atom", 0., 0., 0., 0.]
 
 
-def dualizer(pb_in):
+def dualizer(pb_in_):
+    pb_in = copy.copy(pb_in_)
     if pb_in.f_present == 1:
         if len(pb_in.f) == 1 and pb_in.f[0] == "linear":
             af_in = pb_in.Af.toarray().ravel()
@@ -71,6 +73,7 @@ def dualizer(pb_in):
         pb_in.Dg = sp.eye(1)
         pb_in.cg = [1]
         pb_in.g_present = 1
+        pb_in.bg = [0]
     if pb_in.g_present == 1:
         ch = pb_in.cg.copy()
         blocks_h = pb_in.blocks.copy()
@@ -128,30 +131,33 @@ def print_problem(pb):
         AfT = sp.csc_matrix(pb.Af.T)
         for j, fj in enumerate(pb.f):
             seq += " + "+my_str_mult(pb.cf[j])+fj+"("
-            for i in range(AfT.indptr[j], AfT.indptr[j+1]):
-                if AfT.data[i] >= 0:
-                    seq += "+"
-                seq += my_str_mult(AfT.data[i])+"x["+str(AfT.indices[i])+"]"
-            seq += my_str_add(-pb.bf[j])
-            seq += ")"
+            for jj in range(pb.blocks_f[j], pb.blocks_f[j+1]):
+                for i in range(AfT.indptr[jj], AfT.indptr[jj+1]):
+                    if AfT.data[i] >= 0:
+                        seq += "+"
+                    seq += my_str_mult(AfT.data[i])+"x["+str(AfT.indices[i])+"]"
+                seq += my_str_add(-pb.bf[jj])
+                seq += ")"
     if pb.g_present == 1:
         for i, gi in enumerate(pb.g):
             seq += " + "+my_str_mult(pb.cg[i])+gi+"("
-            if pb.Dg.data[0,i] >= 0:
-                seq += "+"
-            seq += my_str_mult(pb.Dg.data[0,i])+"x["+str(i)+"]"
-            seq += my_str_add(-pb.bg[i])
-            seq += ")"
+            for ii in range(pb.blocks[i], pb.blocks[i+1]):
+                if pb.Dg.data[0,i] >= 0:
+                    seq += "+"
+                seq += my_str_mult(pb.Dg.data[0,i])+"x["+str(ii)+"]"
+                seq += my_str_add(-pb.bg[ii])
+                seq += ")"
     if pb.h_present == 1:
         AhT = sp.csc_matrix(pb.Ah.T)
         for k, hk in enumerate(pb.h):
             seq += " + "+my_str_mult(pb.ch[k])+hk+"("
-            for i in range(AhT.indptr[k], AhT.indptr[k+1]):
-                if AhT.data[i] >= 0:
-                    seq += "+"
-                seq += my_str_mult(AhT.data[i])+"x["+str(AhT.indices[i])+"]"
-            seq += my_str_add(-pb.bh[k])
-            seq += ")"
+            for kk in range(pb.blocks_h[k], pb.blocks_h[k+1]):
+                for i in range(AhT.indptr[kk], AhT.indptr[kk+1]):
+                    if AhT.data[i] >= 0:
+                        seq += "+"
+                    seq += my_str_mult(AhT.data[i])+"x["+str(AhT.indices[i])+"]"
+                seq += my_str_add(-pb.bh[kk])
+                seq += ")"
     print(seq)
     return seq
 

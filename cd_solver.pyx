@@ -72,6 +72,7 @@ class Problem:
                   blocks_h=input_problem.blocks_h
                   h_takes_infinite_values=input_problem.h_takes_infinite_values
                   Q=input_problem.Q
+                  Q_present=input_problem.Q_present
 
             self.N = N
             if blocks is None:
@@ -165,7 +166,7 @@ class Problem:
                 blocks_h = np.arange(len(h)+1, dtype=np.uint32)
             if len(blocks_h) != len(h) + 1 or blocks_h[-1] != Ah.shape[0]:
                     raise Warning("blocks_h seems to be ill defined.")
-            if Q is None:
+            if Q is None or Q_present == False:
                 self.Q_present = False
                 Q = sparse.csc_matrix((N, N))  # 0 matrix
             else:
@@ -488,7 +489,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE[:] Lf
     if N == n:
         Lf = np.abs(pb.Q.diagonal()) + 1e-30 * np.ones(N)
-    elif Q_present == False:
+    elif Q_present == 0:
         Lf = 1e-30 * np.ones(n)
     else:
         raise Exception('Nonzero Q and blocks together not implemented')
