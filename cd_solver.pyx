@@ -72,6 +72,7 @@ class Problem:
                   blocks_h=input_problem.blocks_h
                   h_takes_infinite_values=input_problem.h_takes_infinite_values
                   Q=input_problem.Q
+                  Q_present=input_problem.Q_present
 
             self.N = N
             if blocks is None:
@@ -80,6 +81,8 @@ class Problem:
             if x_init is None:
                   self.x_init = np.zeros(N)
             else:
+                  if len(x_init) != N:
+                        raise Warning("x_init should have length N")
                   self.x_init = x_init
 
             if f is not None and len(f) > 0:
@@ -163,7 +166,7 @@ class Problem:
                 blocks_h = np.arange(len(h)+1, dtype=np.uint32)
             if len(blocks_h) != len(h) + 1 or blocks_h[-1] != Ah.shape[0]:
                     raise Warning("blocks_h seems to be ill defined.")
-            if Q is None:
+            if Q is None or Q_present == False:
                 self.Q_present = False
                 Q = sparse.csc_matrix((N, N))  # 0 matrix
             else:
@@ -188,6 +191,9 @@ class Problem:
             self.blocks_h = np.array(blocks_h, dtype=np.uint32)
             if y_init is None:
                   y_init = np.zeros(self.Ah.shape[0])
+            elif len(y_init) != Ah.shape[0] and len(y_init) != len(Ah.data):
+                  print(len(y_init), Ah.shape[0])
+                  raise Warning("y_init does not have the good length")
             self.y_init = y_init
             self.h_takes_infinite_values = h_takes_infinite_values
             self.Q = Q
@@ -481,7 +487,13 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         tmp_Lf[j] = cf[j] * f[j](buff_x, buff, blocks_f[j+1]-blocks_f[j],
                          LIPSCHITZ, useless_param, useless_param)
         max_Lf = fmax(max_Lf, tmp_Lf[j])
-    cdef DOUBLE[:] Lf = np.abs(pb.Q.diagonal()) + 1e-30 * np.ones(N)
+    cdef DOUBLE[:] Lf
+    if N == n:
+        Lf = np.abs(pb.Q.diagonal()) + 1e-30 * np.ones(N)
+    elif Q_present == 0:
+        Lf = 1e-30 * np.ones(n)
+    else:
+        raise Exception('Nonzero Q and blocks together not implemented')
     if f_present is True:
         for ii in range(n):
             # if block size is > 1, we use the inequality frobenius norm > 2-norm

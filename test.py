@@ -56,7 +56,6 @@ def smoothed_gap(pb, x, y):
     pb_.y_init = y
     cd_solver.coordinate_descent(pb_, max_iter=1, algorithm=None,
                                      verbose=0.1, print_style='smoothed_gap')
-    # accelerated=-1 is a trick for bypassing the update.
     if pb_.performance_stats['Smoothed Gap'][2] > 1e-10:
         while pb_.performance_stats['Smoothed Gap'][2] < pb_.performance_stats['Smoothed Gap'][0]:
             gamma_print = pb_.performance_stats['Smoothed Gap'][2] * 2.
