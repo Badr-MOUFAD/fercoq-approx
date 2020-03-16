@@ -381,8 +381,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 dual_vars_to_update[ii][i+1] = dual_vars_to_update_[ii][i]
             
     else:
+        dual_vars_to_update_ = []
         dual_vars_to_update = np.empty((0,0), dtype=np.uint32)
-        
+
     # Definition of residuals
     cdef DOUBLE[:] rf
     if f_present is True:
@@ -784,6 +785,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         pb.printed_values.append([elapsed_time, iter,
                                                       primal_val, change_in_x])
                 elif print_style == 'smoothed_gap' or tolerance > 0:
+                    print(np.linalg.norm(np.array(Sy)))
                     # When we print, we check
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
@@ -939,7 +941,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
     pb.performance_stats = {"Time (s)": elapsed_time, "Iterations": iter,
                                 "Smoothed Gap": [smoothed_gap, beta_print, gamma_print],
-                                "Change in x": change_in_x, "Change_in_y": change_in_x,
+                                "Change in x": change_in_x, "Change_in_y": change_in_y,
                                 "Primal value": primal_val, "Infeasibility": infeas}
     pb.sol = np.array(x).copy()
     if algorithm == 'vu-condat-cd':
@@ -956,6 +958,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     else:
         raise Exception('Not implemented')
 
+    pb.dual_vars_to_update = dual_vars_to_update_
+  
     free(f)
     free(g)
     free(h)
