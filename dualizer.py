@@ -44,8 +44,12 @@ def dualizer(pb_in_):
             Af = pb_in.bh
             bf = [0]
         else:
-            Af = pb_in.bh - (pb_in.Ah.dot(pb_in.Dg.dot(pb_in.bg))).T
-            bf = [-np.sum(af_in * pb_in.Dg.dot(pb_in.bg))]
+            Dgbg = 0 * pb_in.bg
+            for i in range(len(pb_in.g)):
+                Dgbg[pb_in.blocks[i]:pb_in.blocks[i+1]] = \
+                    pb_in.Dg.data[0][i] * pb_in.bg[pb_in.blocks[i]:pb_in.blocks[i+1]]
+            Af = pb_in.bh - (pb_in.Ah.dot(Dgbg)).T
+            bf = [-np.sum(af_in * Dgbg)]
     else:
         f = None
         Af = pb_in.bh
@@ -77,9 +81,13 @@ def dualizer(pb_in_):
     if pb_in.g_present == 1:
         ch = pb_in.cg.copy()
         blocks_h = pb_in.blocks.copy()
-        Ah = -(pb_in.Ah.multiply(1 / pb_in.Dg.dot(pb_in.cg))).T
-        Ah = sp.csc_matrix(Ah)
-        bh = af_in / pb_in.Dg.dot(pb_in.cg)
+        Dgcg = 0 * pb_in.bg
+        for i in range(len(pb_in.g)):
+            Dgcg[pb_in.blocks[i]:pb_in.blocks[i+1]] = \
+                pb_in.Dg.data[0][i] * pb_in.cg[i]
+        Ah = -(pb_in.Ah.multiply(1 / Dgcg)).T
+        Ah = sp.csr_matrix(Ah)  # for fast row access
+        bh = af_in / Dgcg
         h = []
         for k, g_i in enumerate(pb_in.g):
             atom_fench, c_fench, a_fench, b_fench, l_fench = fenchel(g_i)
@@ -92,6 +100,7 @@ def dualizer(pb_in_):
                 bh[k] *= a_fench
             bh[k] += b_fench
 
+        Ah = sp.csc_matrix(Ah)
         N = Ah.shape[1]  # this should be equal to blocks[-1]
 
     pb_out = cd_solver.Problem(N=N, f=f, Af=Af, bf=bf,

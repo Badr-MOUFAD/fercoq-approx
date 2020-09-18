@@ -797,7 +797,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         pb.printed_values.append([elapsed_time, iter,
                                                       primal_val, change_in_x])
                 elif print_style == 'smoothed_gap' or tolerance > 0:
-                    print(np.linalg.norm(np.array(Sy)))
                     # When we print, we check
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
