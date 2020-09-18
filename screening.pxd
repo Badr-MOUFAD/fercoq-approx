@@ -1,9 +1,9 @@
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True screening.pyx
 
-from atoms cimport *
+from .atoms cimport *
 # bonus: same imports as in atoms
-from helpers cimport compute_smoothed_gap
+from .helpers cimport compute_smoothed_gap
 
 
 cdef DOUBLE polar_matrix_norm(atom func, UINT32_t* Af_indptr,

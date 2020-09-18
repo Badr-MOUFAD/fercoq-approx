@@ -9,7 +9,7 @@ from Cython.Distutils import build_ext, Extension
 descr = 'Efficient implementation of a generic CD solver'
 
 
-DISTNAME = 'cd_solver'
+DISTNAME = 'cd_solver_'
 DESCRIPTION = descr
 MAINTAINER = 'Olivier Fercoq'
 MAINTAINER_EMAIL = 'olivier.fercoq@telecom-paristech.fr'
@@ -18,7 +18,7 @@ DOWNLOAD_URL = 'https://bitbucket.org/ofercoq/cd_solver.git'
 URL = 'https://bitbucket.org/ofercoq/cd_solver/src'
 
 
-setup(name='cd_solver',
+setup(name='cd_solver_',
       description=DESCRIPTION,
       long_description=open('README').read(),
       license=LICENSE,

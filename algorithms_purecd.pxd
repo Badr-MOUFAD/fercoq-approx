@@ -1,7 +1,7 @@
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True algorithms_purecd.pyx
 
-from atoms cimport *
+from .atoms cimport *
 # bonus: same imports as in atoms
 
 

@@ -1,8 +1,8 @@
 ## Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
-# cython --cplus -X boundscheck=False -X cdivision=True cd_solver.pyx
+# cython --cplus -X boundscheck=False -X cdivision=True cd_solver_.pyx
 
 
-from atoms cimport *
+from .atoms cimport *
 # bonus: same imports as in atoms
 
 from libc.stdlib cimport malloc, free
@@ -15,17 +15,17 @@ import warnings
 import time
 import sys
 
-from helpers cimport compute_primal_value, compute_smoothed_gap
-from algorithms cimport one_step_coordinate_descent
-from algorithms cimport one_step_accelerated_coordinate_descent
-from algorithms cimport RAND_R_MAX
-from algorithms_purecd cimport one_step_pure_cd
-from algorithms_purecd cimport one_step_s_pdhg
-from screening cimport polar_matrix_norm, do_gap_safe_screening
-from screening cimport update_focus_set, dual_scaling
+from .helpers cimport compute_primal_value, compute_smoothed_gap
+from .algorithms cimport one_step_coordinate_descent
+from .algorithms cimport one_step_accelerated_coordinate_descent
+from .algorithms cimport RAND_R_MAX
+from .algorithms_purecd cimport one_step_pure_cd
+from .algorithms_purecd cimport one_step_s_pdhg
+from .screening cimport polar_matrix_norm, do_gap_safe_screening
+from .screening cimport update_focus_set, dual_scaling
 
-from algorithms import find_dual_variables_to_update, variable_restart
-from algorithms_stripd import compute_theta_pure_cd, transform_f_into_h
+from .algorithms import find_dual_variables_to_update, variable_restart
+from .algorithms_purecd import compute_theta_pure_cd, transform_f_into_h
 
 # The following three functions are copied from Scikit Learn.
 
