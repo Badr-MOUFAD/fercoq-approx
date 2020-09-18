@@ -19,13 +19,13 @@ from helpers cimport compute_primal_value, compute_smoothed_gap
 from algorithms cimport one_step_coordinate_descent
 from algorithms cimport one_step_accelerated_coordinate_descent
 from algorithms cimport RAND_R_MAX
-from algorithms_stripd cimport one_step_s_tri_pd
-from algorithms_stripd cimport one_step_s_pdhg
+from algorithms_purecd cimport one_step_pure_cd
+from algorithms_purecd cimport one_step_s_pdhg
 from screening cimport polar_matrix_norm, do_gap_safe_screening
 from screening cimport update_focus_set, dual_scaling
 
 from algorithms import find_dual_variables_to_update, variable_restart
-from algorithms_stripd import compute_theta_s_tri_pd, transform_f_into_h
+from algorithms_stripd import compute_theta_pure_cd, transform_f_into_h
 
 # The following three functions are copied from Scikit Learn.
 
@@ -359,7 +359,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
     cdef UINT32_t[:] inv_blocks_h = np.zeros(pb.Ah.shape[0], dtype=np.uint32)
     cdef UINT32_t[:,:] dual_vars_to_update
-    cdef DOUBLE[:] theta_s_tri_pd = np.empty(1)
+    cdef DOUBLE[:] theta_pure_cd = np.empty(1)
     if h_present is True and algorithm is not None:
         # As h is not required to be separable, we need some preprocessing
         # to detect what dual variables need to be processed
@@ -369,11 +369,11 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         if (algorithm == 'vu-condat-cd' or algorithm == 'smart-cd'):
             dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
                                                 Ah_indptr, Ah_indices, inv_blocks_h)
-        elif algorithm == 's-tri-pd':
-            theta_s_tri_pd_, dual_vars_to_update_ = compute_theta_s_tri_pd(n,
+        elif algorithm == 'pure-cd':
+            theta_pure_cd_, dual_vars_to_update_ = compute_theta_pure_cd(n,
                                                 pb.Ah.shape[0], blocks, blocks_h,
                                                 Ah_indptr, Ah_indices, inv_blocks_h)
-            theta_s_tri_pd = np.array(theta_s_tri_pd_, dtype=float)
+            theta_pure_cd = np.array(theta_pure_cd_, dtype=float)
         elif algorithm == 's-pdhg':
             dual_vars_to_update_ = [[0]]*n  # all the dual variables are updated so nothing to do here.
         else: raise Exception('Not implemented')
@@ -402,7 +402,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         rhx = pb.Ah * x - pb.bh
     else:
         rhx = np.empty(0)
-    if algorithm == 's-tri-pd' or algorithm == 's-pdhg':
+    if algorithm == 'pure-cd' or algorithm == 's-pdhg':
         rhx_jj = np.array(rhx).copy()
     cdef DOUBLE[:] rhy = np.zeros(pb.Ah.shape[1])
     cdef DOUBLE[:] Sy = np.zeros(pb.Ah.shape[0])
@@ -412,7 +412,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             for l in range(Ah_indptr[i], Ah_indptr[i+1]):
                 Sy[Ah_indices[l]] += y[l] / Ah_nnz_perrow[Ah_indices[l]]
                 rhy[i] += Ah_data[l] * y[l]
-    elif h_present is True and (algorithm == 's-tri-pd'
+    elif h_present is True and (algorithm == 'pure-cd'
                 or algorithm == 's-pdhg' or algorithm == None):
         Sy = y
         # Just a convenient alias since y does not have any
@@ -526,7 +526,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 dual_step_size = magnitude / n * np.ones(len(pb.blocks_h))
                 primal_step_size = 0.9 / (dual_step_size[0] * n *
                                               np.array(norm2_columns_Ah))
-        elif algorithm == 'vu-condat-cd' or algorithm == 's-tri-pd':
+        elif algorithm == 'vu-condat-cd' or algorithm == 'pure-cd':
             tmp_Lf = np.empty(n)
             for ii in range(n):
                 tmp_Lf[ii] = 0
@@ -551,7 +551,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                             tmp_Lf[ii] += Ah_data[l] ** 2 \
                               * dual_step_size[inv_blocks_h[Ah_indices[l]]] \
                               * Ah_nnz_perrow[Ah_indices[l]]
-            elif algorithm == 's-tri-pd':
+            elif algorithm == 'pure-cd':
                 tmp_Lf = np.empty(n)
                 for ii in range(n):
                     tmp_Lf[ii] = 0
@@ -560,7 +560,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                             tmp_Lf[ii] += Ah_data[l] ** 2 \
                               * dual_step_size[inv_blocks_h[Ah_indices[l]]]
-                tmp_Lf = np.array(tmp_Lf) * np.array(theta_s_tri_pd)
+                tmp_Lf = np.array(tmp_Lf) * np.array(theta_pure_cd)
             primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
         else: raise Exception('Not implemented')
             
@@ -710,8 +710,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x)
-        elif algorithm == 's-tri-pd':
-            one_step_s_tri_pd(x,
+        elif algorithm == 'pure-cd':
+            one_step_pure_cd(x,
                     y, prox_y, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
@@ -724,7 +724,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     ch, bh,
                     Q_indptr, Q_indices, Q_data,
                     f, g, h, f_present, g_present, h_present,
-                    primal_step_size, dual_step_size, theta_s_tri_pd,
+                    primal_step_size, dual_step_size, theta_pure_cd,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x, &change_in_y)
@@ -801,10 +801,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
                         for j in range(len_pb_h):
-                            if algorithm == 'vu-condat-cd' or algorithm == 's-tri-pd' \
+                            if algorithm == 'vu-condat-cd' or algorithm == 'pure-cd' \
                                   or algorithm == None:
                                 # Compute one more prox_h* in case Sy is not feasible
-                                #    (Sy = y in the case 's-tri-pd')
+                                #    (Sy = y in the case 'pure-cd')
                                 for l in range(blocks_h[j+1]-blocks_h[j]):
                                     buff_y[l] = Sy[blocks_h[j]+l] \
                                       + rhx[blocks_h[j]+l] * dual_step_size[j]
@@ -958,7 +958,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     if algorithm == 'vu-condat-cd':
         pb.dual_sol = np.array(Sy).copy()
         pb.dual_sol_duplicated = np.array(y).copy()
-    elif (algorithm == 'smart-cd' or algorithm == 's-tri-pd'
+    elif (algorithm == 'smart-cd' or algorithm == 'pure-cd'
               or algorithm == 's-pdhg' or algorithm == None):
         pb.dual_sol = np.array(prox_y).copy()
         pb.dual_sol_duplicated = np.zeros(pb.Ah.nnz, dtype=float)

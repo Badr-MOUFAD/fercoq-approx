@@ -1,5 +1,5 @@
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
-# cython --cplus -X boundscheck=False -X cdivision=True algorithms.pyx
+# cython --cplus -X boundscheck=False -X cdivision=True algorithms_purecd.pyx
 
 from atoms cimport *
 # bonus: same imports as in atoms
@@ -11,7 +11,7 @@ cdef enum:
     # particularly tiny on Windows/MSVC.
     RAND_R_MAX = 0x7FFFFFFF
 
-cdef void one_step_s_tri_pd(DOUBLE[:] x,
+cdef void one_step_pure_cd(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] prox_y, DOUBLE[:] rhx,
         DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
@@ -29,7 +29,7 @@ cdef void one_step_s_tri_pd(DOUBLE[:] x,
         atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
-        DOUBLE [:] theta_s_tri_pd,
+        DOUBLE [:] theta_pure_cd,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, 
         UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,

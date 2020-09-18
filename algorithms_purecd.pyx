@@ -1,7 +1,10 @@
-# Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
-# cython --cplus -X boundscheck=False -X cdivision=True algorithms.pyx
+# Authors: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
+#          Ahmet Alacaoglu <ahmet.alacaoglu@epfl.ch>
+# cython --cplus -X boundscheck=False -X cdivision=True algorithms_purecd.pyx
+# Code for the paper "Random extrapolation for primal-dual coordinate descent"
 
-# C definitions in algorithms.pxd
+
+# C definitions in algorithms_purecd.pxd
 import numpy as np
 from scipy import sparse
 from algorithms import find_dual_variables_to_update
@@ -20,7 +23,7 @@ cdef inline UINT32_t rand_int(UINT32_t end, UINT32_t* random_state) nogil:
     return our_rand_r(random_state) % end
 
 
-def compute_theta_s_tri_pd(UINT32_t n, UINT32_t Ah_shape0,
+def compute_theta_pure_cd(UINT32_t n, UINT32_t Ah_shape0,
                         UINT32_t[:] blocks, UINT32_t[:] blocks_h,
                         UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices,
                         UINT32_t[:] inv_blocks_h, UINT32_t keep_all=0):
@@ -51,25 +54,14 @@ def compute_theta_s_tri_pd(UINT32_t n, UINT32_t Ah_shape0,
                 lenlisti = len(dual_vars_to_update_2[ii])
                 if (i == 0) or (dual_vars_to_update_2[ii][lenlisti - 1] != jh):
                     dual_vars_to_update_2[ii].append(jh)
-
-    # Add dummy dependences if the probability to select a dual variable
-    #   is not uniform
-    # It would be better to add dummy dependences related to the blocks of h
-    #   but we leave this for future work.
+    
     m = max([len(dual_vars_to_update_2[ii]) for ii in range(n)])
-    for ii in range(n):
-        while len(dual_vars_to_update_2[ii]) < m:
-            random_numbers = list(np.random.randint(0, Ah_shape0,
-                              m - len(dual_vars_to_update_2[ii])))
-            dual_vars_to_update_2[ii] = sorted(set(dual_vars_to_update_2[ii]
-                                                       + random_numbers))
+    theta_pure_cd = [m] * n
 
-    theta_s_tri_pd = [m] * n
-
-    return theta_s_tri_pd, dual_vars_to_update_2
+    return theta_pure_cd, dual_vars_to_update_2
 
 
-cdef void one_step_s_tri_pd(DOUBLE[:] x,
+cdef void one_step_pure_cd(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] prox_y, DOUBLE[:] rhx,
         DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
@@ -87,14 +79,12 @@ cdef void one_step_s_tri_pd(DOUBLE[:] x,
         atom* f, atom* g, atom* h,
         int f_present, int g_present, int h_present,
         DOUBLE[:] primal_step_size, DOUBLE[:] dual_step_size,
-        DOUBLE [:] theta_s_tri_pd,
+        DOUBLE [:] theta_pure_cd,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, 
         UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
         UINT32_t per_pass,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
-    # Algorithm developed by A. Alacaoglu and O. Fercoq
-    # dual_vars_to_update contains indices in [0, Ah.shape[0])
 
     cdef UINT32_t ii, i, coord, j, jh, l, lh, jj, j_prev
     cdef UINT32_t nb_coord
@@ -216,7 +206,7 @@ cdef void one_step_s_tri_pd(DOUBLE[:] x,
                     jh = dual_vars_to_update[ii][1+i]
                     j = inv_blocks_h[jh]
                     dy = prox_y[jh] + dual_step_size[j] \
-                      * theta_s_tri_pd[ii] * (rhx[jh] - rhx_jj[jh]) - y[jh]
+                      * Ah_nnz_perrow[jh] * (rhx[jh] - rhx_jj[jh]) - y[jh]
                     y[jh] += dy
                     change_in_y[0] += fabs(dy)
 
@@ -261,6 +251,7 @@ cdef void one_step_s_pdhg(DOUBLE[:] x,
     cdef int focus_on_kink_or_not = 0
     cdef DOUBLE dy, dxi
     cdef DOUBLE rhy_i
+    cdef int a,b
     if n_active == 0:
         return
     for f_iter in range(n * per_pass):
@@ -301,7 +292,15 @@ cdef void one_step_s_pdhg(DOUBLE[:] x,
         if g_present is True:
             for i in range(nb_coord):
                 coord = blocks[ii] + i
-                buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
+                if f_present is True:
+                    a = Af_indptr[coord]
+                    b = Af_indptr[coord+1]
+                    if b-a == 0:
+                        buff_x[i] = Dg_data[ii] * (x[coord]) - bg[coord]
+                    else:
+                        buff_x[i] = Dg_data[ii] * (x[coord]-primal_step_size[coord]*Af_data[a]) - bg[coord]
+                else:
+                    buff_x[i] = Dg_data[ii] * (x[coord]) - bg[coord]
             g[ii](buff_x, buff, nb_coord, PROX,
                   cg[ii]*Dg_data[ii]*Dg_data[ii]*primal_step_size[ii],
                   useless_param)
@@ -317,6 +316,10 @@ cdef void one_step_s_pdhg(DOUBLE[:] x,
                 for l in range(Q_indptr[coord], Q_indptr[coord+1]):
                     0  # this has not been analyzed
                 if f_present is True:
+                    ## just for correct obj value
+                    for l in range(Af_indptr[coord], Af_indptr[coord+1]):
+                        j = Af_indices[l]
+                        rf[j] += Af_data[l] * dxi
                     0  # this has not been analyzed
                 if h_present is True:
                     for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
