@@ -5,7 +5,6 @@ import copy
 
 import scipy.sparse as sp
 import cd_solver
-from helpers import check_grad
 
 # imports for loading datasets
 from scipy import io
@@ -16,20 +15,57 @@ from sklearn.datasets import svmlight_format, fetch_rcv1
 #sys.path.append("../tv_l1_solver")
 #from load_poldrack import load_gain_poldrack
 
-# Check gradients
-print('Testing gradients:')
-test = check_grad('square', [1], nb_coord=1)
-print('square', test[0])
-test = check_grad('linear', [1], nb_coord=1)
-print('linear', test[0])
-test = check_grad('log1pexp', [1], nb_coord=1)
-print('log1pexp', test[0])
-test = check_grad('logsumexp', [1, -2, 3], nb_coord=3)
-print('logsumexp', test[0])
+if 0:
+    # Check gradients
+    print('Testing gradients:')
+    test = check_grad('square', [1], nb_coord=1)
+    print('square', test[0])
+    test = check_grad('linear', [1], nb_coord=1)
+    print('linear', test[0])
+    test = check_grad('log1pexp', [1], nb_coord=1)
+    print('log1pexp', test[0])
+    test = check_grad('logsumexp', [1, -2, 3], nb_coord=3)
+    print('logsumexp', test[0])
 
 
+if 1:
+    # test theta_purecd
+    from cd_solver.algorithms_purecd import compute_theta_pure_cd
+    from cd_solver.algorithms import find_dual_variables_to_update
+    Ah = np.array([[-1, 1], [2,0]])
+    Ah = sp.csc_matrix(Ah)
+    m, n = Ah.shape
+    dual_vars_to_update_ = find_dual_variables_to_update(np.uint32(n),
+                                np.arange(n+1, dtype=np.uint32),
+                                np.arange(m+1, dtype=np.uint32),
+                                np.array(Ah.indptr, dtype=np.uint32),
+                                np.array(Ah.indices, dtype=np.uint32),
+                                np.arange(m, dtype=np.uint32))
+    theta, dual_vars_to_update_2 = compute_theta_pure_cd(np.uint32(n),
+                               np.uint32(m), np.arange(n+1, dtype=np.uint32),
+                               np.arange(m+1, dtype=np.uint32),
+                               np.array(Ah.indptr, dtype=np.uint32),
+                               np.array(Ah.indices, dtype=np.uint32),
+                               np.arange(m, dtype=np.uint32))
+    print(theta, ', ', dual_vars_to_update_2, ', ', dual_vars_to_update_)
 
-probs = [6]
+def smoothed_gap(pb, x, y):
+    pb_ = copy.copy(pb)
+    pb_.x_init = x
+    pb_.y_init = y
+    cd_solver.cd_solver.coordinate_descent(pb_, max_iter=1, algorithm=None,
+                                     verbose=0.1, print_style='smoothed_gap')
+    if pb_.performance_stats['Smoothed Gap'][2] > 1e-10:
+        while pb_.performance_stats['Smoothed Gap'][2] < pb_.performance_stats['Smoothed Gap'][0]:
+            gamma_print = pb_.performance_stats['Smoothed Gap'][2] * 2.
+            cd_solver.cd_solver.coordinate_descent(pb_, max_iter=1, algorithm=None,
+                                     verbose=0., print_style='smoothed_gap',
+                                     gamma_print_=gamma_print)
+    return pb_.performance_stats['Smoothed Gap']
+
+
+    
+probs = [7]
 
 for prob in probs:
     if prob == 0:
@@ -40,10 +76,10 @@ for prob in probs:
 
         g = ["abs", "abs"]
 
-
         pb_toy = cd_solver.Problem(N=2, f=f, Af=A, bf=bf, cf=cf, g=g)
 
-        cd_solver.coordinate_descent(pb_toy, max_iter=100, verbose=0.5, print_style='smoothed_gap', min_change_in_x=0.)
+        for algorithm in ['cd', 'approx', 'pure-cd', 's-pdhg']:
+            cd_solver.coordinate_descent(pb_toy, max_iter=100, verbose=0.5, print_style='smoothed_gap', min_change_in_x=0., algorithm=algorithm)
 
     if (prob >= 1 and prob <= 4) or prob == 6 or prob == 11 or prob == 13:
         dataset = 'leukemia'
@@ -78,7 +114,7 @@ for prob in probs:
         print("Lasso on Leukemia with screening, momentum and variable restart")
         cd_solver.coordinate_descent(pb_leukemia_lasso_acc, max_iter=1000,
                     verbose=1., print_style='smoothed_gap', tolerance=1e-10,
-                    accelerated=True, restart_period=4, screening='gapsafe')
+                    algorithm='smart-cd', restart_period=4, screening='gapsafe')
         
     if prob == 2:
         # Logistic regression
@@ -128,8 +164,8 @@ for prob in probs:
         cd_solver.coordinate_descent(pb_leukemia_lasso, max_iter=100, verbose=0.5, print_style='smoothed_gap')
 
     if prob == 5:
-        # basic problem with constraints
-        print('basic problem with constraints')
+        # basic cd_solver.Problem with constraints
+        print('basic cd_solver.Problem with constraints')
         f = ["square", "square"]
         cf = [0.5, 0.5]
         bf = [1, -0.5]
@@ -144,8 +180,8 @@ for prob in probs:
 
         cd_solver.coordinate_descent(pb_toy_const, max_iter=1000, verbose=0.001, print_style='smoothed_gap')
 
-        print('basic problem with constraints by SMART-CD')
-        cd_solver.coordinate_descent(pb_toy_const_smartcd, max_iter=1000, verbose=0.01, print_style='smoothed_gap', accelerated=True, restart_period=10)
+        print('basic cd_solver.Problem with constraints by SMART-CD')
+        cd_solver.coordinate_descent(pb_toy_const_smartcd, max_iter=1000, verbose=0.01, print_style='smoothed_gap', algorithm='smart-cd', restart_period=10)
 
     if prob == 6:
         # SVM with intercept
@@ -167,7 +203,7 @@ for prob in probs:
 
         print("dual SVM with intercept on Leukemia, no Cholesky")
         Q = 1. / alpha * (X.T.multiply(y)).T.dot(X.T.multiply(y))
-        pb_leukemia_svm_intercept_nochol = cd_solver.Problem(N=X.shape[0],
+        pb_leukemia_svm_intercept_nochol = cd_solver.cd_solver.Problem(N=X.shape[0],
                                             Q=Q,
                                             f=["linear"],
                                             Af=-np.ones((1,X.shape[0])),
@@ -182,18 +218,17 @@ for prob in probs:
 
         cd_solver.coordinate_descent(pb_leukemia_svm_intercept_nochol, max_iter=10000, verbose=0.5, print_style='smoothed_gap')
 
-        cd_solver.coordinate_descent(pb_leukemia_svm_intercept_nochol, max_iter=10000, verbose=0.5, print_style='smoothed_gap', accelerated=True, restart_period=10)
+        cd_solver.coordinate_descent(pb_leukemia_svm_intercept_nochol, max_iter=10000, verbose=0.5, print_style='smoothed_gap', algorithm='smart-cd', restart_period=10)
 
     if prob == 7:
         print("dual SVM with intercept on RCV1")
 
         # data = svmlight_format.load_svmlight_file('/home/ofercoq/scikit_learn_data/mldata/rcv1_train.binary')
-        # data = io.loadmat('/data/ofercoq/datasets/Classification/rcv1_train.binary.mat')
-        data = fetch_rcv1()
+        data = io.loadmat('/home/ofercoq/datasets/rcv1_train.binary.mat')
+        # data = fetch_rcv1()
 
-
-        X = data.data.astype(np.float)
-        y = data.target.astype(np.float).ravel()
+        X = data['X'].astype(np.float)
+        y = data['y'].astype(np.float).ravel()
         
         C = 1. / X.shape[0]
         alpha = 0.25 / X.shape[0]
@@ -208,8 +243,9 @@ for prob in probs:
                                             h=["eq_const"],
                                             Ah=sp.csc_matrix(y)
                                                           )
-        
-        cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=300, verbose=2., print_style='smoothed_gap', step_size_factor=alpha/1000, sampling='kink_half')
+        for algorithm in ['vu-condat-cd', 'smart-cd', 'pure-cd']:
+            cd_solver.coordinate_descent(pb_rcv1_svm_intercept, max_iter=1000, verbose=2., print_style='smoothed_gap', step_size_factor=alpha,  #sampling='kink_half',
+                                         algorithm=algorithm)
 
     if prob == 8:
         print("TV regularized least squares on toy dataset")
@@ -253,12 +289,11 @@ for prob in probs:
                                         Ah=alpha*threeDgradient
                                         )
 
-        pb_toy_tvl1_smartcd = copy.copy(pb_toy_tvl1)
-        
-        cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=1000000, verbose=0.1, max_time=1., print_style='smoothed_gap')
-
-        print("TV regularized least squares on toy dataset by SMART-CD")
-        cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=1000000, verbose=0.1, max_time=1., print_style='smoothed_gap', accelerated=True)
+        for algorithm in ['vu-condat-cd', 'smart-cd', 's-tri-pd', 's-pdhg']:
+            print("TV regularized least squares on toy dataset by %s" %algorithm)
+            cd_solver.coordinate_descent(pb_toy_tvl1, max_iter=1000000,
+                    verbose=0.5, max_time=2., print_style='smoothed_gap',
+                    tolerance=1e-19, algorithm=algorithm)
 
     if prob == 9:
         try:
@@ -392,9 +427,9 @@ for prob in probs:
         pb_leukemia_sparse_logreg = cd_solver.Problem(N=X.shape[1],
                                                f=["log1pexp"] * X.shape[0],
                                                Af=(X.T.multiply(y)).T,
-                                               bf=y,
+                                               bf=np.zeros(X.shape[0]),
                                                cf=[1] * X.shape[0],
                                                g=["abs"] * X.shape[1],
                                                cg=[0.5*np.linalg.norm(X.T.dot(0.5 - (1+y)/2.),np.inf)] * X.shape[1])
 
-        cd_solver.coordinate_descent(pb_leukemia_sparse_logreg, max_iter=150, verbose=2., print_style='smoothed_gap')
+        cd_solver.coordinate_descent(pb_leukemia_sparse_logreg, max_iter=150, verbose=2., print_style='gap', screening='gapsafe', min_change_in_x=0, tolerance=1e-12)

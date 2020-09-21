@@ -1,15 +1,21 @@
 # Author: Olivier Fercoq <olivier.fercoq@telecom-paristech.fr>
 # cython --cplus -X boundscheck=False -X cdivision=True screening.pyx
 
-from atoms cimport *
+from .atoms cimport *
 # bonus: same imports as in atoms
-from helpers cimport compute_smoothed_gap
+from .helpers cimport compute_smoothed_gap
 
 
 cdef DOUBLE polar_matrix_norm(atom func, UINT32_t* Af_indptr,
                                   UINT32_t nb_coord, UINT32_t[:] Af_indices,
                                   DOUBLE[:] Af_data, DOUBLE Qii,
 				  UINT32_t kink_number)
+
+cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
+                              UINT32_t n_active,
+                              UINT32_t[:] active_set, pb, atom* g,
+                              DOUBLE[:] buff_x)
+
 
 cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
                               UINT32_t n_active_prev, pb,

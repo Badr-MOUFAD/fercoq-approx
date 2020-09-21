@@ -128,7 +128,7 @@ cdef DOUBLE polar_support_kink(atom func, DOUBLE[:] x,
 
 
 cdef DOUBLE polar_support_dual_domain(atom func, DOUBLE[:] x,
-                                          UINT32_t nb_coord):
+                                          UINT32_t nb_coord) nogil:
     # polar support function of the domain of g*
     cdef DOUBLE val
     cdef UINT32_t i
@@ -144,8 +144,45 @@ cdef DOUBLE polar_support_dual_domain(atom func, DOUBLE[:] x,
        return sqrt(val)
     if func == box_zero_one:
         return 0.
-    # code for no more kink point
+    # error code for not implemented
     return -1.
+
+
+cdef DOUBLE dual_scaling(DOUBLE[:] z, DOUBLE[:] AfTz, DOUBLE[:] w,
+                             UINT32_t n_active,
+                             UINT32_t[:] active_set, pb, atom* g,
+                             DOUBLE[:] buff_x):
+    cdef UINT32_t i, ii, iii, coord, nb_coord
+    cdef DOUBLE scaling = 1.
+    cdef int raise_not_implemented_warning = 0
+    for iii in range(n_active):
+        ii = active_set[iii]
+        nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
+        for i in range(nb_coord):
+            coord = pb.blocks[ii] + i
+            buff_x[i] = -AfTz[coord] - w[coord]
+        norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
+                           / (pb.cg[ii] * fabs(pb.Dg.data[0][ii]))  # fabs missing in the cd_solver paper
+        scaling = fmax(scaling, norm_dom_g_i)
+        if norm_dom_g_i < 0:
+            raise_not_implemented_warning = 1
+            break
+
+    if raise_not_implemented_warning:
+        print('polar_support_dual_domain not implemented for at least '
+                          'one of the atoms: dual scaling skipped')
+        scaling = 1.
+
+    else:
+        for i in range(len(np.array(z))):
+            z[i] /= scaling
+        for i in range(len(np.array(AfTz))):
+            AfTz[i] /= scaling
+        for i in range(len(np.array(w))):
+            w[i] /= scaling
+
+    return scaling
+
 
 
 cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
@@ -161,34 +198,19 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
     cdef UINT32_t i, ii, iii, l, j, kink_number, coord, nb_coord
     cdef UINT32_t n_active = n_active_prev
     cdef DOUBLE beta = 0.
-    cdef DOUBLE gamma = 0.
+    cdef DOUBLE gamma = 1. / INF
     cdef DOUBLE[:] w = np.array(rQ).copy()
 
-    cdef DOUBLE scaling = 1.
-    for iii in range(n_active):
-        ii = active_set[iii]
-        nb_coord = pb.blocks[ii+1] - pb.blocks[ii]
-        for i in range(nb_coord):
-            coord = pb.blocks[ii] + i
-            buff_x[i] = AfTz[coord] + w[coord]
-        norm_dom_g_i = polar_support_dual_domain(g[ii], buff_x, nb_coord) \
-                           / (pb.cg[ii] * pb.Dg.data[0][ii])
-        scaling = fmax(scaling, norm_dom_g_i)
-
-    z = np.array(z) / scaling
-    AfTz = np.array(AfTz) / scaling
-    w = np.array(w) / scaling
+    cdef DOUBLE scaling = dual_scaling(z, AfTz, w, n_active,
+                                           active_set, pb, g, buff_x)
 
     # Scale dual vector and compute duality gap
     gap = compute_smoothed_gap(pb, f, g, h, x,
                                    rf, rhx, rQ, prox_y, z, AfTz, w,
                                    buff_x, buff_y, buff,
-                                   &beta, &gamma, compute_z=False)
+                                   &beta, &gamma, compute_z=False,
+                                   compute_gamma=False)
 
-    if gamma > 1e2 / INF:
-        print('Warning in gap safe screening: dual vector is not feasible',
-                  gamma)
-    
     # Screen
     iii = 0
     while iii < n_active:

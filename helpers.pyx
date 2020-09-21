@@ -73,7 +73,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
                              DOUBLE[:] rQ,
                              DOUBLE[:] Sy, DOUBLE[:] z, DOUBLE[:] AfTz,
-                             DOUBLE[:] w_,
+                             DOUBLE[:] w,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* beta, DOUBLE* gamma, compute_z=True,
                              compute_gamma=True):
@@ -92,12 +92,10 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
     cdef DOUBLE[:] bg = pb.bg
     cdef DOUBLE[:] ch = pb.ch
     cdef DOUBLE[:] bh = pb.bh
-
-    cdef DOUBLE[:] w
     
     if compute_z is True:
         # w is the dual variable associated to 0.5 xT Q x
-        w = rQ
+        w = rQ.copy()
         val += np.array(x).dot(np.array(w))
 
         # z is the dual variable associated to f(Af x - bf)
@@ -116,7 +114,6 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                 AfTz[i] = AfTz_[i]  # otherwise the pointer seems to be broken
         # else: AfTz is initialized with np.zeros(N)
     else:
-        w = w_
         max_w = np.linalg.norm(np.array(w), np.inf)
         max_rQ = np.linalg.norm(np.array(rQ), np.inf)
         if max_w > 0:
@@ -135,8 +132,8 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                      blocks_f[j+1]-blocks_f[j], VAL_CONJ,
                      useless_param, useless_param)
             val += np.array(bf).dot(np.array(z))
-    # print('contrib_f=', val)
-            
+    # print('contrib_f=', val, np.array(z).dot(np.array(rf)), np.array(bf).dot(np.array(z)))
+
     if pb.h_present is True:
         AhTSy = pb.Ah.T.dot(np.array(Sy))
     else:
@@ -155,23 +152,22 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             val_g += cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
                                        useless_param, useless_param)
 
-        # estimate dual infeasibility
-        dual_infeas = 0.
-        for ii in range(len(pb.g)):
-            nb_coord = blocks[ii+1] - blocks[ii]
-            for i in range(nb_coord):
-                coord = blocks[ii] + i
-                buff_x[i] = 1. / Dg_data[ii] * (
-                    - (AfTz[coord] + AhTSy[coord] + w[coord])
-                    + bg[coord])
-                # project -AfTz - AhTSy - w onto the domain of g*
-            g[ii](buff_x, buff, nb_coord,
-                  PROX_CONJ, 1./INF, cg[ii])
-            for i in range(nb_coord):
-                dual_infeas += (buff[i] - buff_x[i]) ** 2
-        dual_infeas = sqrt(dual_infeas)
-
         if compute_gamma == True:
+            # estimate dual infeasibility
+            dual_infeas = 0.
+            for ii in range(len(pb.g)):
+                nb_coord = blocks[ii+1] - blocks[ii]
+                for i in range(nb_coord):
+                    coord = blocks[ii] + i
+                    buff_x[i] = 1. / Dg_data[ii] * (
+                        - (AfTz[coord] + AhTSy[coord] + w[coord])
+                        + bg[coord])
+                    # project -AfTz - AhTSy - w onto the domain of g*
+                g[ii](buff_x, buff, nb_coord,
+                      PROX_CONJ, 1./INF, cg[ii])
+                for i in range(nb_coord):
+                    dual_infeas += (Dg_data[ii] * (buff[i] - buff_x[i])) ** 2
+            dual_infeas = sqrt(dual_infeas)
             gamma[0] = max(1./INF, dual_infeas)
 
         # compute g*_gamma(-AfTz - AhTSy - w;x) = -(AfTz + AhTSy + w)(xbar) - g(xbar) - gamma/2 ||x-xbar||**2
@@ -196,7 +192,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             # compute g*_gamma(-AfTz - AhTSy;x)
             for i in range(nb_coord):
                 coord = blocks[ii] + i
-                buff_x[i] = Dg_data[ii] * xbar[coord] - bg[coord]
+                buff_x[i] = buff[i]  # = Dg_data[ii] * xbar[coord] - bg[coord]
             val_g1 -= cg[ii] * g[ii](buff_x, buff, nb_coord, VAL,
                                         useless_param, useless_param)
             for i in range(nb_coord):
