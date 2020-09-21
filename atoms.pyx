@@ -65,13 +65,17 @@ cdef DOUBLE prox_conj(atom func, DOUBLE[:] x,
     # prox_{a f*}(x) = x - a prox{1/a f}(x/a)
     # prox_{a (ch)*}(y) = y - a prox{1/a (ch)}(y/a)
     cdef int i
-    for i in range(nb_coord):
-        x[i] /= prox_param  # trick to save a bit of memory
-    func(x, buff, nb_coord, PROX,
-                prox_param2/prox_param, useless_param)
-    for i in range(nb_coord):
-        x[i] *= prox_param  # we undo the trick
-        buff[i] = x[i] - prox_param * buff[i]
+    if prox_param > 0:
+        for i in range(nb_coord):
+            x[i] /= prox_param  # trick to save a bit of memory
+        func(x, buff, nb_coord, PROX,
+             prox_param2/prox_param, useless_param)
+        for i in range(nb_coord):
+            x[i] *= prox_param  # we undo the trick
+            buff[i] = x[i] - prox_param * buff[i]
+    elif prox_param == 0:
+        for i in range(nb_coord):
+            buff[i] = x[i] 
     return buff[0]
 
 

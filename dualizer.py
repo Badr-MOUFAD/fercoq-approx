@@ -1,4 +1,4 @@
-import cd_solver
+from .cd_solver_ import *
 import scipy.sparse as sp
 import numpy as np
 import copy

@@ -7,7 +7,7 @@
 # C definitions in algorithms_purecd.pxd
 import numpy as np
 from scipy import sparse
-from algorithms import find_dual_variables_to_update
+from .algorithms import find_dual_variables_to_update
 
 
 cdef inline UINT32_t our_rand_r(UINT32_t* seed) nogil:
@@ -205,6 +205,7 @@ cdef void one_step_pure_cd(DOUBLE[:] x,
                 for i in range(dual_vars_to_update[ii][0]):
                     jh = dual_vars_to_update[ii][1+i]
                     j = inv_blocks_h[jh]
+                    #  We use Ah_nnz_perrow instead of theta_pure_cd
                     dy = prox_y[jh] + dual_step_size[j] \
                       * Ah_nnz_perrow[jh] * (rhx[jh] - rhx_jj[jh]) - y[jh]
                     y[jh] += dy

@@ -1,4 +1,5 @@
 all:
+	make cython
 	python3 setup.py build_ext --inplace
 
 debug:
@@ -27,5 +28,5 @@ algorithms_purecd.cpp: atoms.cpp algorithms.cpp algorithms_purecd.pyx algorithms
 screening.cpp: helpers.cpp screening.pyx screening.pxd
 	cython --cplus -X boundscheck=False -X cdivision=True -X wraparound=False -X language_level=3 screening.pyx
 
-cd_solver.cpp: atoms.cpp helpers.cpp algorithms.cpp algorithms_purecd.cpp screening.cpp cd_solver_.pyx
+cd_solver_.cpp: atoms.cpp helpers.cpp algorithms.cpp algorithms_purecd.cpp screening.cpp cd_solver_.pyx
 	cython --cplus -X boundscheck=False -X cdivision=True -X language_level=3 cd_solver_.pyx

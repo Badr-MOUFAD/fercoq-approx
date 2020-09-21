@@ -217,7 +217,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     # check_period: period for smoothed gap computation
     # step_size_factor: number to balance primal and dual step sizes
     # sampling: either 'uniform' or 'kink_half'
-    # algorithm: either 'vu-condat-cd', 'smart-cd', 's-tri-pd', 's-pdhg',
+    # algorithm: either 'vu-condat-cd', 'smart-cd', 'pure-cd', 's-pdhg',
     #    'rpdbu',
     #    'cd' = 'vu-condat-cd' and 'approx' = 'smart-cd'
     # restart_period: initial restart period for accelerated method
@@ -331,7 +331,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             for i in range(N):
                 for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
                     y[lh] = pb.y_init[Ah_indices[lh]]
-    elif algorithm == 'smart-cd' or algorithm == 's-tri-pd' \
+    elif algorithm == 'smart-cd' or algorithm == 'pure-cd' \
             or algorithm == 's-pdhg' or algorithm == None:
         if pb.y_init.shape[0] == pb.Ah.shape[0] or h_present is False:
             y_center = pb.y_init.copy()
@@ -526,7 +526,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 dual_step_size = magnitude / n * np.ones(len(pb.blocks_h))
                 primal_step_size = 0.9 / (dual_step_size[0] * n *
                                               np.array(norm2_columns_Ah))
-        elif algorithm == 'vu-condat-cd' or algorithm == 'pure-cd':
+        elif algorithm == 'vu-condat-cd':
             tmp_Lf = np.empty(n)
             for ii in range(n):
                 tmp_Lf[ii] = 0
@@ -541,29 +541,40 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                             * step_size_factor
             magnitude = np.maximum(1e-30, np.max(magnitude))
             dual_step_size = magnitude * np.ones(len(pb.blocks_h))
-            if algorithm == 'vu-condat-cd':
-                tmp_Lf = np.empty(n)
-                for ii in range(n):
-                    tmp_Lf[ii] = 0
-                    for i in range(blocks[ii+1] - blocks[ii]):
+            tmp_Lf = np.empty(n)
+            for ii in range(n):
+                  tmp_Lf[ii] = 0
+                  for i in range(blocks[ii+1] - blocks[ii]):
                         coord = blocks[ii] + i
                         for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                            tmp_Lf[ii] += Ah_data[l] ** 2 \
-                              * dual_step_size[inv_blocks_h[Ah_indices[l]]] \
-                              * Ah_nnz_perrow[Ah_indices[l]]
-            elif algorithm == 'pure-cd':
-                tmp_Lf = np.empty(n)
-                for ii in range(n):
-                    tmp_Lf[ii] = 0
-                    for i in range(blocks[ii+1] - blocks[ii]):
+                              tmp_Lf[ii] += Ah_data[l] ** 2 \
+                                            * dual_step_size[inv_blocks_h[Ah_indices[l]]] \
+                                            * Ah_nnz_perrow[Ah_indices[l]]
+            primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
+        elif algorithm == 'pure-cd':
+            tmp_Lf = np.empty(n)
+            for ii in range(n):
+                  tmp_Lf[ii] = 0
+                  for i in range(blocks[ii+1] - blocks[ii]):
                         coord = blocks[ii] + i
                         for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
-                            tmp_Lf[ii] += Ah_data[l] ** 2 \
-                              * dual_step_size[inv_blocks_h[Ah_indices[l]]]
-                tmp_Lf = np.array(tmp_Lf) * np.array(theta_pure_cd)
+                              tmp_Lf[ii] += Ah_data[l] ** 2
+            for jj in range(len(pb.blocks_h)-1):
+                  dual_step_size[jj] = 1. / (Ah_nnz_perrow[jj]*np.sqrt(np.amax(np.array(tmp_Lf))))
+
+            tmp_Lf = np.empty(n)
+            for ii in range(n):
+                  tmp_Lf[ii] = 0
+                  for i in range(blocks[ii+1] - blocks[ii]):
+                        coord = blocks[ii] + i
+                        for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                              tmp_Lf[ii] += Ah_data[l] ** 2 \
+                                            * dual_step_size[inv_blocks_h[Ah_indices[l]]] \
+                                            * Ah_nnz_perrow[Ah_indices[l]]
             primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
         else: raise Exception('Not implemented')
-            
+
+    print('step-sizes', primal_step_size[0], dual_step_size[0])
     beta = beta0
 
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
