@@ -1,9 +1,5 @@
-The s-tri-pd branch is implementing a collection of primal-dual coordinate
-descent methods.
-
-------------------------------------------
-
-Coordinate descent solver based on Olivier Fercoq and Pascal Bianchi, "A coordinate descent primal-dual algorithm with large step size and possibly non separable functions." arXiv preprint arXiv:1508.04625 (2015).
+This software is based on the paper
+Olivier Fercoq (2019). "A generic coordinate descent solver for non-smooth convex optimisation". Optimization Methods and Software, 1-21.
 
 The user defines an optimization problem of the form
 min_x sum_j cf[j] * f[j](Af[j] * x - bf[j]) + sum_i cg[i] * g[i](Dg[i] * x[i] - bg[i]) + sum_l ch[l] * h[l](Ah[l] * x - ch[l])
@@ -18,9 +14,17 @@ Examples are provided in the file test.py
 
 The solver solves the optimization problem using a coordinate descent method. Under the hood, efficient residual updates and duplication of dual variables are performed.
 
-More information in the paper A generic coordinate descent solver for nonsmooth convex optimization https://arxiv.org/abs/1812.00628.
+The algorithms that are implemented are described in
 
-Copyright Olivier Fercoq -- Telecom ParisTech
+Olivier Fercoq and Pascal Bianchi, "A coordinate descent primal-dual algorithm with large step size and possibly non separable functions." SIAM Journal on Optimization, 29(1), 100-134.
+
+Chambolle, A., Ehrhardt, M. J., Richtárik, P., & Schonlieb, C. B. (2018). "Stochastic primal-dual hybrid gradient algorithm with arbitrary sampling and imaging applications." SIAM Journal on Optimization, 28(4), 2783-2808.
+
+Alacaoglu, A., Fercoq, O., & Cevher, V. (2020). "Random extrapolation for primal-dual coordinate descent". In Proceedings of the 37th International Conference on Machine Learning (ICML 2020)
+
+Alacaoglu, A., Dinh, Q. T., Fercoq, O., & Cevher, V. (2017). Smooth primal-dual coordinate descent algorithms for nonsmooth convex optimization. In Advances in Neural Information Processing Systems (pp. 5852-5861).
+
+Copyright Olivier Fercoq -- Telecom Paris
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
