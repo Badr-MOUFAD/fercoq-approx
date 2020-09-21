@@ -26,7 +26,8 @@ cdef inline UINT32_t rand_int(UINT32_t end, UINT32_t* random_state) nogil:
 def compute_theta_pure_cd(UINT32_t n, UINT32_t Ah_shape0,
                         UINT32_t[:] blocks, UINT32_t[:] blocks_h,
                         UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices,
-                        UINT32_t[:] inv_blocks_h, UINT32_t keep_all=0):
+                        UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
+                        UINT32_t keep_all=0):
     cdef UINT32_t i, ii, lh, jh, j
     dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
                                   Ah_indptr, Ah_indices, inv_blocks_h)
@@ -56,13 +57,13 @@ def compute_theta_pure_cd(UINT32_t n, UINT32_t Ah_shape0,
                     dual_vars_to_update_2[ii].append(jh)
     
     m = max([len(dual_vars_to_update_2[ii]) for ii in range(n)])
-    theta_pure_cd = [m] * n
+    theta_pure_cd = np.array(Ah_nnz_perrow)  # [m] * n
 
     return theta_pure_cd, dual_vars_to_update_2
 
 
-cdef void one_step_pure_cd(DOUBLE[:] x,
-        DOUBLE[:] y, DOUBLE[:] prox_y, DOUBLE[:] rhx,
+cdef void one_step_pure_cd(DOUBLE[:] x, DOUBLE[:] x_av,
+        DOUBLE[:] y, DOUBLE[:] y_av, DOUBLE[:] prox_y, DOUBLE[:] rhx,
         DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
         DOUBLE[:] grad,
@@ -83,7 +84,7 @@ cdef void one_step_pure_cd(DOUBLE[:] x,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, 
         UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
-        UINT32_t per_pass,
+        UINT32_t per_pass, UINT32_t average,
         DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
 
     cdef UINT32_t ii, i, coord, j, jh, l, lh, jj, j_prev
@@ -202,14 +203,26 @@ cdef void one_step_pure_cd(DOUBLE[:] x,
         if h_present is True:
             for i in range(nb_coord):
                 coord = blocks[ii] + i
-                for i in range(dual_vars_to_update[ii][0]):
-                    jh = dual_vars_to_update[ii][1+i]
+                for l in range(dual_vars_to_update[ii][0]):
+                    jh = dual_vars_to_update[ii][1+l]
                     j = inv_blocks_h[jh]
                     #  We use Ah_nnz_perrow instead of theta_pure_cd
                     dy = prox_y[jh] + dual_step_size[j] \
                       * Ah_nnz_perrow[jh] * (rhx[jh] - rhx_jj[jh]) - y[jh]
                     y[jh] += dy
                     change_in_y[0] += fabs(dy)
+
+        # compute averages
+        if average > 0:
+            for i in range(nb_coord):
+                coord = blocks[ii] + i
+                x_av[coord] += 1./average * (x[coord] - x_av[coord])
+                for l in range(dual_vars_to_update[ii][0]):
+                    jh = dual_vars_to_update[ii][1+l]
+                    j = inv_blocks_h[jh]
+                    # we compute \breve{y}, not the average of y
+                    y_av[jh] += 1./average * (prox_y[jh] - y_av[jh])
+            average += 1
 
     return
 

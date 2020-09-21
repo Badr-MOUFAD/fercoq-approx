@@ -205,7 +205,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            min_change_in_x=1e-15, tolerance=0,
                            check_period=10, step_size_factor=1.,
                            sampling='uniform', algorithm='vu-condat-cd',
-                           int restart_period=0, callback=None, int per_pass=1,
+                           int average=0, int restart_period=0, callback=None,
+                           int per_pass=1,
                            screening=None, gamma_print_=None):
     # pb is a Problem as defined above
     # max_iter: maximum number of passes over the data
@@ -220,7 +221,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     # algorithm: either 'vu-condat-cd', 'smart-cd', 'pure-cd', 's-pdhg',
     #    'rpdbu',
     #    'cd' = 'vu-condat-cd' and 'approx' = 'smart-cd'
-    # restart_period: initial restart period for accelerated method
+    # restart_period: initial restart period for accelerated or averaged method
+    # average: if average==True, return compute ergodic sequence   
     # per_pass: number of times we go through the data before releasing the gil
     # screening: if screening == 'gapsafe': do gap safe screening (Ndiaye et al)
     #
@@ -344,6 +346,20 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         y = y_center.copy()
     else: raise Exception('Not implemented')
 
+    cdef DOUBLE[:] x_av
+    cdef DOUBLE[:] y_av
+    if algorithm != 'pure-cd' and average != 0:
+        print('cd_solver warning: averaging is not implemented for ' + algorithm)
+        average = 0
+    if average == 0:
+        x_av = np.empty(0)
+        y_av = np.empty(0)
+    else:
+        x_av = x.copy()
+        y_av = y.copy()
+        if average < 0:
+            print('cd_solver warning: average should be a nonnegative integer.')
+
     cdef UINT32_t[:] inv_blocks_f = np.zeros(pb.Af.shape[0], dtype=np.uint32)
 
     if f_present is True:
@@ -371,8 +387,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                                 Ah_indptr, Ah_indices, inv_blocks_h)
         elif algorithm == 'pure-cd':
             theta_pure_cd_, dual_vars_to_update_ = compute_theta_pure_cd(n,
-                                                pb.Ah.shape[0], blocks, blocks_h,
-                                                Ah_indptr, Ah_indices, inv_blocks_h)
+                                                pb.Ah.shape[0], blocks,
+                                                blocks_h,
+                                                Ah_indptr, Ah_indices,
+                                                inv_blocks_h, Ah_nnz_perrow)
             theta_pure_cd = np.array(theta_pure_cd_, dtype=float)
         elif algorithm == 's-pdhg':
             dual_vars_to_update_ = [[0]]*n  # all the dual variables are updated so nothing to do here.
@@ -560,7 +578,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                               tmp_Lf[ii] += Ah_data[l] ** 2
             for jj in range(len(pb.blocks_h)-1):
-                  dual_step_size[jj] = 1. / (Ah_nnz_perrow[jj]*np.sqrt(np.amax(np.array(tmp_Lf))))
+                  dual_step_size[jj] = 1. / (Ah_nnz_perrow[jj]*np.sqrt(np.amax(np.array(tmp_Lf)))) * step_size_factor
 
             tmp_Lf = np.empty(n)
             for ii in range(n):
@@ -574,7 +592,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
         else: raise Exception('Not implemented')
 
-    print('step-sizes', primal_step_size[0], dual_step_size[0])
     beta = beta0
 
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
@@ -722,8 +739,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x)
         elif algorithm == 'pure-cd':
-            one_step_pure_cd(x,
-                    y, prox_y, rhx, rhx_jj, rf, rQ,
+            one_step_pure_cd(x, x_av,
+                    y, y_av, prox_y, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
                     Af_indptr, Af_indices, Af_data, cf, bf,
@@ -738,9 +755,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     primal_step_size, dual_step_size, theta_pure_cd,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
-                    per_pass, &change_in_x, &change_in_y)
+                    per_pass, average, &change_in_x, &change_in_y)
         elif algorithm == 's-pdhg':
-            one_step_s_pdhg( x, y, rhx, rhx_jj, rf, rQ,
+            one_step_s_pdhg(x, y, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
                     Af_indptr, Af_indices, Af_data, cf, bf,
@@ -900,54 +917,65 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             n_focus = update_focus_set(focus_set, n_active, active_set,
                                            g, pb, x, buff_x, buff)
 
-        if algorithm == 'smart-cd' and restart_period > 0:
+        if (algorithm == 'smart-cd' or average > 0) and restart_period > 0:
             do_restart, next_period = variable_restart(restart_history,
                                         iter - offset, restart_period, next_period)
             if do_restart is True:
                 if verbose > 0:
                     print_restart += 1
-                xe = np.array(xe) + c_theta * np.array(xc)
-                rfe = np.array(rfe) + c_theta * np.array(rfc)
-                rQe = np.array(rQe) + c_theta * np.array(rQc)
-                xc = np.zeros(x.shape[0])
-                rfc = np.zeros(rf.shape[0])
-                rQc = np.zeros(rQ.shape[0])
+                if algorithm == 'smart-cd':
+                    xe = np.array(xe) + c_theta * np.array(xc)
+                    rfe = np.array(rfe) + c_theta * np.array(rfc)
+                    rQe = np.array(rQe) + c_theta * np.array(rQc)
+                    xc = np.zeros(x.shape[0])
+                    rfc = np.zeros(rf.shape[0])
+                    rQc = np.zeros(rQ.shape[0])
 
-                if screening == 'gapsafe':
-                    # I do not know why but the residual update has rather
-                    # large errors in this case
-                    #   => recompute residuals
-                    rQe = pb.Q.dot(xe)
-                    rfe = pb.Af.dot(xe) - pb.bf
+                    if screening == 'gapsafe':
+                        # I do not know why but the residual update has rather
+                        # large errors in this case
+                        #   => recompute residuals
+                        rQe = pb.Q.dot(xe)
+                        rfe = pb.Af.dot(xe) - pb.bf
 
-                if h_present is True:
-                    rhxe = np.array(rhxe) + c_theta * np.array(rhxc)
-                    rhxc = np.zeros(rhx.shape[0])
-                    y_center = np.array(prox_y).copy()  # heuristic
-                if sampling_law == 1:
-                    theta0 = 0.5 / n_active
-                else:
-                    theta0 = 1. / n_active
-                theta = theta0
-                beta = beta0
-                c_theta = 1.
-                offset = iter
-                ## if h_present is False:
-                ##     val = 0.
-                ##     compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
-                ##              buff_x, buff_y, buff, &val, &infeas)
-                ##     if val > val_backup:
-                ##         print('Function value has increased: backup')
-                ##         x = np.array(x_backup).copy()
-                ##         xe = np.array(x).copy()
-                ##         xc = 0 * np.array(xe)
-                ##         rfe = pb.Af.dot(np.array(xe)) - pb.bf
-                ##         rQe = pb.Q.dot(np.array(xe))
-                ##         rfc = 0 * np.array(rfe)
-                ##         rQc = 0 * np.array(rQe)
-                ##     else:
-                ##         val_backup = val
-                ##         x_backup = np.array(xe).copy()
+                    if h_present is True:
+                        rhxe = np.array(rhxe) + c_theta * np.array(rhxc)
+                        rhxc = np.zeros(rhx.shape[0])
+                        y_center = np.array(prox_y).copy()  # heuristic
+                    if sampling_law == 1:
+                        theta0 = 0.5 / n_active
+                    else:
+                        theta0 = 1. / n_active
+                    theta = theta0
+                    beta = beta0
+                    c_theta = 1.
+                    offset = iter
+
+                    ## if h_present is False:
+                    ##     val = 0.
+                    ##     compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
+                    ##              buff_x, buff_y, buff, &val, &infeas)
+                    ##     if val > val_backup:
+                    ##         print('Function value has increased: backup')
+                    ##         x = np.array(x_backup).copy()
+                    ##         xe = np.array(x).copy()
+                    ##         xc = 0 * np.array(xe)
+                    ##         rfe = pb.Af.dot(np.array(xe)) - pb.bf
+                    ##         rQe = pb.Q.dot(np.array(xe))
+                    ##         rfc = 0 * np.array(rfe)
+                    ##         rQc = 0 * np.array(rQe)
+                    ##     else:
+                    ##         val_backup = val
+                    ##         x_backup = np.array(xe).copy()
+
+                elif average > 0:
+                    average = 1
+                    x = x_av.copy()
+                    y = y_av.copy()
+                    rQ = pb.Q.dot(x)
+                    rf = pb.Af.dot(x) - pb.bf
+                    if h_present is True:
+                        rhx = pb.Ah * x - pb.bh
 
         if verbose != 0 and iter >= max_iter - per_pass:
             print("Maximum number of iterations reached: stopping the algorithm "
