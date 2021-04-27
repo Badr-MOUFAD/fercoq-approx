@@ -18,6 +18,8 @@ cdef atom string_to_func(bytes func_string):
             return second_order_cone
     elif func_string[0] == 'a':
         return abs
+    elif func_string[0] == 'm':
+        return max0x
     elif func_string[0] == 'n':
         return norm2
     elif func_string[0] == 'l':
@@ -158,6 +160,52 @@ cdef DOUBLE abs(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE pro
         val = 0.
         for i in range(nb_coord):
             val += fabs(x[i])
+        return val
+
+cdef DOUBLE max0x(DOUBLE[:] x, DOUBLE[:] buff, int nb_coord, MODE mode, DOUBLE prox_param, DOUBLE prox_param2) nogil:
+    # Function x -> max(0,x)
+    cdef int i
+    cdef DOUBLE val
+    if mode == GRAD:
+        for i in range(nb_coord):
+            buff[i] = (sign(x[i]) + 1)/2.
+        return buff[0]
+    elif mode == PROX:
+        for i in range(nb_coord):
+            if x[i] < 0:
+                buff[i] = x[i]
+            else:
+                buff[i] = max(0., x[i] - prox_param)
+        return buff[0]
+    elif mode == PROX_CONJ:
+        for i in range(nb_coord):
+            val = x[i]
+            if val > prox_param2:
+                buff[i] = prox_param2
+            elif val < 0:
+                buff[i] = 0
+            else:
+                buff[i] = x[i]
+        # return prox_conj(abs, x, buff, nb_coord, prox_param, prox_param2)
+    elif mode == LIPSCHITZ:
+        buff[0] = INF
+        return buff[0]
+    elif mode == IS_KINK:
+        for i in range(nb_coord):
+            if x[i] != 0:
+                return 0
+        return 1
+    elif mode == VAL_CONJ:
+        for i in range(nb_coord):
+            if x[i] > NEARLY_ONE:
+                return INF
+            elif x[i] < 0.:
+                return INF
+        return 0 # val_conj_not_implemented(ABS, x, buff, nb_coord)
+    else:  # mode == VAL
+        val = 0.
+        for i in range(nb_coord):
+            val += max(0, x[i])
         return val
 
 

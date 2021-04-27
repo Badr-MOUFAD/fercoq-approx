@@ -21,9 +21,13 @@ cdef inline UINT32_t rand_int(UINT32_t end, UINT32_t* random_state) nogil:
 def find_dual_variables_to_update(UINT32_t n,
                                   UINT32_t[:] blocks, UINT32_t[:] blocks_h,
                                   UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices,
-                                  UINT32_t[:] inv_blocks_h):
+                                  UINT32_t[:] inv_blocks_h, pb):
 
     cdef UINT32_t ii, i, j, l, lh, coord, nb_coord
+    if n == 1:
+        dual_vars_to_update_ = [np.arange(pb.Ah.nnz).tolist()]
+        return dual_vars_to_update_
+
     dual_vars_to_update_ = [[] for ii in range(n)]
     for ii in range(n):
         nb_coord = blocks[ii+1] - blocks[ii]
@@ -38,6 +42,24 @@ def find_dual_variables_to_update(UINT32_t n,
                 dual_vars_to_update_[ii].insert(l, lh)
 
     return dual_vars_to_update_
+
+
+cdef void dual_prox_operator(DOUBLE[:] buff, DOUBLE[:] buff_y,
+                             DOUBLE[:] y, DOUBLE[:] prox_y,
+                             DOUBLE[:] rhx, int len_pb_h, atom* h,
+                             UINT32_t[:] blocks_h, DOUBLE[:] dual_step_size,
+                             DOUBLE[:] ch) nogil:
+
+    cdef UINT32_t j, l
+    for j in range(len_pb_h):
+        for l in range(blocks_h[j+1]-blocks_h[j]):
+            buff_y[l] = y[blocks_h[j]+l] \
+                             + rhx[blocks_h[j]+l] * dual_step_size[j]
+        h[j](buff_y, buff, blocks_h[j+1]-blocks_h[j],
+             PROX_CONJ, dual_step_size[j], ch[j])
+        for l in range(blocks_h[j+1]-blocks_h[j]):
+            prox_y[blocks_h[j]+l] = buff[l]
+
 
 
 cdef void one_step_coordinate_descent(DOUBLE[:] x,
@@ -403,19 +425,23 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
     return
 
 
-def variable_restart(restart_history, iter, restart_period, next_period):
+def variable_restart(restart_history, iter, restart_period, next_period,
+                     fixed_restart_period=False):
     if (iter % next_period) != next_period - 1:
         return (False, next_period)
     else:
-        j = 0
-        while j < len(restart_history) and restart_history[j] == 1:
-            j += 1
-        for i in range(j):
-            restart_history[i] = 0
-        if j < len(restart_history):
-            restart_history[j] = 1
+        if fixed_restart_period == True:
+            return (True, restart_period)
         else:
-            restart_history.append(1)
+            j = 0
+            while j < len(restart_history) and restart_history[j] == 1:
+                j += 1
+            for i in range(j):
+                restart_history[i] = 0
+            if j < len(restart_history):
+                restart_history[j] = 1
+            else:
+                restart_history.append(1)
 
-        return (True, restart_period * 2**j)
+            return (True, restart_period * 2**j)
         

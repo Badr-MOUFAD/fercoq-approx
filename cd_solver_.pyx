@@ -16,7 +16,7 @@ import time
 import sys
 
 from .helpers cimport compute_primal_value, compute_smoothed_gap
-from .algorithms cimport one_step_coordinate_descent
+from .algorithms cimport dual_prox_operator, one_step_coordinate_descent
 from .algorithms cimport one_step_accelerated_coordinate_descent
 from .algorithms cimport RAND_R_MAX
 from .algorithms_purecd cimport one_step_pure_cd
@@ -26,6 +26,8 @@ from .screening cimport update_focus_set, dual_scaling
 
 from .algorithms import find_dual_variables_to_update, variable_restart
 from .algorithms_purecd import compute_theta_pure_cd, transform_f_into_h
+from .algorithms_purecd import finish_averaging
+
 
 # The following three functions are copied from Scikit Learn.
 
@@ -205,7 +207,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            min_change_in_x=1e-15, tolerance=0,
                            check_period=10, step_size_factor=1.,
                            sampling='uniform', algorithm='vu-condat-cd',
-                           int average=0, int restart_period=0, callback=None,
+                           UINT32_t average=0, int restart_period=0,
+                           fixed_restart_period=False, callback=None,
                            int per_pass=1,
                            screening=None, gamma_print_=None):
     # pb is a Problem as defined above
@@ -279,7 +282,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef UINT32_t[:] Ah_indptr = np.array(pb.Ah.indptr, dtype=np.uint32)
     cdef UINT32_t[:] Ah_indices = np.array(pb.Ah.indices, dtype=np.uint32)  # I do not know why but the order of the indices is changed here...
     cdef DOUBLE[:] Ah_data = np.array(pb.Ah.data, dtype=float)  # Fortunately, it seems that the same thing happens here.
-    cdef UINT32_t[:] Ah_nnz_perrow = np.array((pb.Ah!=0).sum(axis=1), dtype=np.uint32).ravel()  # a improvement would be to cout the number of nonzero blocks instead of the number of nonzero entries
+    cdef UINT32_t[:] Ah_nnz_perrow = np.array(np.minimum(n, (pb.Ah!=0).sum(axis=1)), dtype=np.uint32).ravel()  # an improvement would be to cout the number of nonzero blocks instead of the number of nonzero entries
     cdef DOUBLE[:] bh = pb.bh
     cdef int Q_present = pb.Q_present
     cdef UINT32_t[:] Q_indptr = np.array(pb.Q.indptr, dtype=np.uint32)
@@ -346,20 +349,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         y = y_center.copy()
     else: raise Exception('Not implemented')
 
-    cdef DOUBLE[:] x_av
-    cdef DOUBLE[:] y_av
-    if algorithm != 'pure-cd' and average != 0:
-        print('cd_solver warning: averaging is not implemented for ' + algorithm)
-        average = 0
-    if average == 0:
-        x_av = np.empty(0)
-        y_av = np.empty(0)
-    else:
-        x_av = x.copy()
-        y_av = y.copy()
-        if average < 0:
-            print('cd_solver warning: average should be a nonnegative integer.')
-
     cdef UINT32_t[:] inv_blocks_f = np.zeros(pb.Af.shape[0], dtype=np.uint32)
 
     if f_present is True:
@@ -384,13 +373,13 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 inv_blocks_h[blocks_h[jh]+i] = jh
         if (algorithm == 'vu-condat-cd' or algorithm == 'smart-cd'):
             dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
-                                                Ah_indptr, Ah_indices, inv_blocks_h)
+                                       Ah_indptr, Ah_indices, inv_blocks_h, pb)
         elif algorithm == 'pure-cd':
             theta_pure_cd_, dual_vars_to_update_ = compute_theta_pure_cd(n,
                                                 pb.Ah.shape[0], blocks,
                                                 blocks_h,
                                                 Ah_indptr, Ah_indices,
-                                                inv_blocks_h, Ah_nnz_perrow)
+                                                inv_blocks_h, Ah_nnz_perrow, pb)
             theta_pure_cd = np.array(theta_pure_cd_, dtype=float)
         elif algorithm == 's-pdhg':
             dual_vars_to_update_ = [[0]]*n  # all the dual variables are updated so nothing to do here.
@@ -471,6 +460,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef DOUBLE c_theta = 1.
     cdef DOUBLE beta0 = 1e-30
     cdef DOUBLE beta
+    cdef DOUBLE beta_tmp
+    cdef DOUBLE gamma_tmp
     restart_history = []
     next_period = restart_period
 
@@ -515,7 +506,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     if f_present is True:
         for ii in range(n):
             # if block size is > 1, we use the inequality frobenius norm > 2-norm
-            #   (not optimal)
+            #   (not optimal)              
             for i in range(blocks[ii+1] - blocks[ii]):
                 coord = blocks[ii] + i
                 for l in range(Af_indptr[coord], Af_indptr[coord+1]):
@@ -524,7 +515,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     Lf[ii] += Af_data[l]**2 * tmp_Lf[j]
     
     cdef DOUBLE[:] primal_step_size = 1. / np.array(Lf)
-    cdef DOUBLE[:] dual_step_size = np.empty(len(pb.blocks_h))
+    cdef DOUBLE[:] dual_step_size = np.empty(len(pb.blocks_h)-1)
     cdef DOUBLE[:] norm2_columns_Ah = np.zeros(n)
     if h_present is True:
         if algorithm == 'smart-cd' or algorithm == 's-pdhg' \
@@ -541,7 +532,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             magnitude = 1. / np.maximum(1e-30, np.max(magnitude))
             beta0 = magnitude
             if algorithm == 's-pdhg':
-                dual_step_size = magnitude / n * np.ones(len(pb.blocks_h))
+                dual_step_size = magnitude / n * np.ones(len(pb.blocks_h)-1)
                 primal_step_size = 0.9 / (dual_step_size[0] * n *
                                               np.array(norm2_columns_Ah))
         elif algorithm == 'vu-condat-cd':
@@ -558,7 +549,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 np.array(Lf) / (np.array(tmp_Lf) + 1e-30)) \
                             * step_size_factor
             magnitude = np.maximum(1e-30, np.max(magnitude))
-            dual_step_size = magnitude * np.ones(len(pb.blocks_h))
+            dual_step_size = magnitude * np.ones(len(pb.blocks_h)-1)
             tmp_Lf = np.empty(n)
             for ii in range(n):
                   tmp_Lf[ii] = 0
@@ -571,14 +562,17 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
         elif algorithm == 'pure-cd':
             tmp_Lf = np.empty(n)
-            for ii in range(n):
+            if n==1:
+                  tmp_Lf[0] = spl.norm(pb.Ah)
+            else:
+               for ii in range(n):
                   tmp_Lf[ii] = 0
                   for i in range(blocks[ii+1] - blocks[ii]):
                         coord = blocks[ii] + i
                         for l in range(Ah_indptr[coord], Ah_indptr[coord+1]):
                               tmp_Lf[ii] += Ah_data[l] ** 2
             for jj in range(len(pb.blocks_h)-1):
-                  dual_step_size[jj] = 1. / (Ah_nnz_perrow[jj]*np.sqrt(np.amax(np.array(tmp_Lf)))) * step_size_factor
+                  dual_step_size[jj] = 1. / fmax(1e-10, Ah_nnz_perrow[jj]*np.sqrt(np.amax(np.array(tmp_Lf)))) * step_size_factor
 
             tmp_Lf = np.empty(n)
             for ii in range(n):
@@ -592,6 +586,50 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
         else: raise Exception('Not implemented')
 
+    # Initialization of averaging
+    cdef DOUBLE[:] x_av
+    cdef DOUBLE[:] y_av
+    cdef DOUBLE[:] x_init
+    cdef DOUBLE[:] y_init
+    cdef DOUBLE[:] rf_av
+    cdef DOUBLE[:] rhx_av
+    cdef DOUBLE[:] rQ_av
+    cdef DOUBLE[:] averages
+    cdef DOUBLE[:] prox_y_cpy
+    if algorithm != 'pure-cd' and average != 0:
+        print('cd_solver warning: averaging is not implemented for ' + algorithm)
+        average = 0
+    if average == 0:
+        x_av = np.empty(0)
+        y_av = np.empty(0)
+        x_init = np.empty(0)
+        y_init = np.empty(0)
+        rf_av = np.empty(0)
+        rhx_av = np.empty(0)
+        rQ_av = np.empty(0)
+        prox_y_cpy = np.empty(0)
+        averages = -np.ones(1)
+    else:
+        x_init = x.copy()
+        y_init = y.copy()
+        x_av = x.copy()
+        y_av = y.copy()
+        rf_av = np.array(rf).copy()
+        rhx_av = np.array(rhx).copy()
+        rQ_av = np.array(rQ).copy()
+
+        # we initialize prox_y_cpy with bar{y}_1
+        prox_y_cpy = y.copy()
+        dual_prox_operator(buff, buff_y, y, prox_y_cpy, rhx, len_pb_h, h,
+                           blocks_h, dual_step_size, ch)
+        averages = np.zeros(1+len(pb.g)+pb.Ah.shape[0])
+        # averages[0] counts how many iterates we should average
+        # averages[1+ii] counts how many primal iterates have passed since last update of the average of x[blocks[ii]:blocks[ii+1]]
+        # averages[1+n+jj] does the same for y[jj]
+        averages[0] = 0
+        if average < 0:
+            print('cd_solver warning: average should be a nonnegative integer.')
+        
     beta = beta0
 
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
@@ -649,7 +687,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef UINT32_t iter_last_check = -10
     cdef UINT32_t offset = 0
     cdef DOUBLE primal_val = 0.
+    cdef DOUBLE primal_val_av
     cdef DOUBLE infeas = 0.
+    cdef DOUBLE infeas_av
     cdef DOUBLE dual_val = 0.
     cdef DOUBLE beta_print = 0.
     cdef DOUBLE gamma_print = 0.
@@ -740,7 +780,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     per_pass, &change_in_x)
         elif algorithm == 'pure-cd':
             one_step_pure_cd(x, x_av,
-                    y, y_av, prox_y, rhx, rhx_jj, rf, rQ,
+                    y, y_av, prox_y, prox_y_cpy, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
                     Af_indptr, Af_indices, Af_data, cf, bf,
@@ -755,7 +795,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     primal_step_size, dual_step_size, theta_pure_cd,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
-                    per_pass, average, &change_in_x, &change_in_y)
+                    per_pass, averages, &change_in_x, &change_in_y)
         elif algorithm == 's-pdhg':
             one_step_s_pdhg(x, y, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
@@ -771,7 +811,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     active_set, n_active, 
                     focus_set, n_focus, n, len(pb.h), per_pass,
                     &change_in_x, &change_in_y)
-            
+              
         elapsed_time = time.time() - init_time
         if verbose > 0 or tolerance > 0:
             if ((verbose > 0 and elapsed_time > nb_prints * verbose)
@@ -828,32 +868,23 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     # When we print, we check
                     if h_present is True:
                         beta_print = max(infeas, 1e-20)
-                        for j in range(len_pb_h):
-                            if algorithm == 'vu-condat-cd' or algorithm == 'pure-cd' \
+                        if algorithm == 'vu-condat-cd' or algorithm == 'pure-cd' \
                                   or algorithm == None:
                                 # Compute one more prox_h* in case Sy is not feasible
                                 #    (Sy = y in the case 'pure-cd')
-                                for l in range(blocks_h[j+1]-blocks_h[j]):
-                                    buff_y[l] = Sy[blocks_h[j]+l] \
-                                      + rhx[blocks_h[j]+l] * dual_step_size[j]
-                            elif algorithm == 'smart-cd':
-                                # Compute dual vector
-                                for l in range(blocks_h[j+1]-blocks_h[j]):
-                                    buff_y[l] = y_center[blocks_h[j]+l] \
-                                      + rhx[blocks_h[j]+l] / beta
-                            elif algorithm == 's-pdhg':
-                                0  # nothing to do
-                            else: raise Exception('Not implemented')
+                              dual_prox_operator(buff, buff_y, Sy, prox_y, rhx,
+                                           len_pb_h, h, blocks_h,
+                                           dual_step_size, ch)
+                        elif algorithm == 'smart-cd':
+                              dual_step_size = 0 * np.array(dual_step_size)
+                              Sy = np.array(y_center) + np.array(rhx) / beta
+                              dual_prox_operator(buff, buff_y, Sy, prox_y, rhx,
+                                           len_pb_h, h, blocks_h,
+                                           dual_step_size, ch)
+                        elif algorithm == 's-pdhg':
+                              0  # nothing to do
+                        else: raise Exception('Not implemented')
 
-                            h[j](buff_y, buff,
-                                 blocks_h[j+1]-blocks_h[j],
-                                 PROX_CONJ,
-                                 dual_step_size[j],
-                                 ch[j])
-                            for l in range(blocks_h[j+1]-blocks_h[j]):
-                                prox_y[blocks_h[j]+l] = buff[l]
-                                if algorithm == None:
-                                    prox_y[blocks_h[j]+l] = y_center[blocks_h[j]+l]
                     else:
                         beta_print = 0
 
@@ -864,6 +895,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                         compute_z=True,
                                         compute_gamma=compute_gamma)
 
+                    if smoothed_gap < tolerance and beta_print < tolerance \
+                           and gamma_print < tolerance:
+                        print_time = True
                     if print_style == 'smoothed_gap' and print_time == True:
                         print("%.5f \t %d\t%+.5e\t%.5e\t%.5e\t%.2e %.1e\t%.5e\t%.5e"
                               %(elapsed_time, iter, primal_val, infeas,
@@ -873,13 +907,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                 primal_val, infeas,
                                 smoothed_gap, beta_print, gamma_print,
                                 change_in_x, change_in_y])
-                    if smoothed_gap < tolerance and beta_print < tolerance \
-                           and gamma_print < tolerance:
-                        print("Target tolerance reached: stopping "
-                                  "the algorithm at smoothed_gap=%.5e, "
-                                  "beta=%.5e, gamma=%.5e"
-                                  %(smoothed_gap, beta_print, gamma_print))
-                        break
                 if print_style == 'gap' and print_time == True:
                     # Scale dual vector and compute duality gap
                     compute_smoothed_gap(pb, f, g, h, x,
@@ -919,7 +946,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
         if (algorithm == 'smart-cd' or average > 0) and restart_period > 0:
             do_restart, next_period = variable_restart(restart_history,
-                                        iter - offset, restart_period, next_period)
+                                        iter - offset, restart_period,
+                                        next_period, fixed_restart_period)
             if do_restart is True:
                 if verbose > 0:
                     print_restart += 1
@@ -969,13 +997,56 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     ##         x_backup = np.array(xe).copy()
 
                 elif average > 0:
-                    average = 1
-                    x = x_av.copy()
-                    y = y_av.copy()
-                    rQ = pb.Q.dot(x)
-                    rf = pb.Af.dot(x) - pb.bf
-                    if h_present is True:
-                        rhx = pb.Ah * x - pb.bh
+                    finish_averaging(averages, x_av, y_av, x, prox_y, blocks, len(pb.g), pb.Ah.shape[0])
+                    if fixed_restart_period == 'adaptive':
+                        rQ_av = pb.Q.dot(x_av)
+                        if f_present is True:
+                           rf_av = pb.Af.dot(x_av) - pb.bf
+                        if h_present is True:
+                           rhx_av = pb.Ah * x_av - pb.bh
+                        beta_tmp = 2 * primal_step_size[0] / averages[0]
+                        gamma_tmp = 2 * dual_step_size[0] / averages[0]
+                        smoothed_gap_av = compute_smoothed_gap(pb, f, g, h, x_av,
+                                        rf_av, rhx_av, rQ_av, y_av, z, AfTz, rQ_av,
+                                        buff_x, buff_y, buff,
+                                        &beta_tmp, &gamma_tmp,
+                                        compute_z=True,
+                                        compute_gamma=False)
+                        rQ_av = pb.Q.dot(x_init)
+                        if f_present is True:
+                           rf_av = pb.Af.dot(x_init) - pb.bf
+                        if h_present is True:
+                           rhx_av = pb.Ah * x_init - pb.bh
+
+                        smoothed_gap_init = compute_smoothed_gap(pb, f, g, h, x_init,
+                                        rf_av, rhx_av, rQ_av, y_init, z, AfTz, rQ_av,
+                                        buff_x, buff_y, buff,
+                                        &beta_tmp, &gamma_tmp,
+                                        compute_z=True,
+                                        compute_gamma=False)
+                        if smoothed_gap_init > 0 and smoothed_gap_av > 0 and \
+                           smoothed_gap_init > 2 * smoothed_gap_av:
+                              x_init = x_av.copy()
+                              y_init = y_av.copy()
+                              do_restart = True
+                        else:
+                              print_restart -= 1
+                              do_restart = False
+                        # print(averages[0], smoothed_gap_init, smoothed_gap_av, beta_tmp, gamma_tmp)
+
+                    if do_restart == True:
+                          x = x_av.copy()
+                          y = y_av.copy()
+                          Sy = y
+                          rQ = pb.Q.dot(x)
+                          if f_present is True:
+                              rf = pb.Af.dot(x) - pb.bf
+                          if h_present is True:
+                              rhx = pb.Ah * x - pb.bh
+                              dual_prox_operator(buff, buff_y, y, prox_y_cpy,
+                                                 rhx, len_pb_h, h,
+                                                 blocks_h, dual_step_size, ch)
+                          averages = 0 * np.array(averages)
 
         if verbose != 0 and iter >= max_iter - per_pass:
             print("Maximum number of iterations reached: stopping the algorithm "
@@ -988,6 +1059,14 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             print("Not enough change in iterates (||x(t+1) - x(t)|| = %.5e): "
                       "stopping the algorithm" %change_in_x)
             break
+        if verbose != 0 and tolerance > 0 and smoothed_gap < tolerance \
+                and beta_print < tolerance and gamma_print < tolerance:
+            print("Target tolerance reached: stopping "
+                                  "the algorithm at smoothed_gap=%.5e, "
+                                  "beta=%.5e, gamma=%.5e"
+                                  %(smoothed_gap, beta_print, gamma_print))
+            break
+
 
     pb.performance_stats = {"Time (s)": elapsed_time, "Iterations": iter,
                                 "Smoothed Gap": [smoothed_gap, beta_print, gamma_print],
@@ -999,16 +1078,21 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         pb.dual_sol_duplicated = np.array(y).copy()
     elif (algorithm == 'smart-cd' or algorithm == 'pure-cd'
               or algorithm == 's-pdhg' or algorithm == None):
-        pb.dual_sol = np.array(prox_y).copy()
+        if algorithm == 'smart-cd':
+              pb.dual_sol = np.array(prox_y).copy()
+        else:
+              pb.dual_sol = np.array(y).copy()
         pb.dual_sol_duplicated = np.zeros(pb.Ah.nnz, dtype=float)
         if h_present is True:
             for i in range(N):
                 for lh in range(Ah_indptr[i], Ah_indptr[i+1]):
-                    pb.dual_sol_duplicated[lh] = prox_y[Ah_indices[lh]]
+                    pb.dual_sol_duplicated[lh] = pb.dual_sol[Ah_indices[lh]]
     else:
         raise Exception('Not implemented')
 
     pb.dual_vars_to_update = dual_vars_to_update_
+    pb.primal_step_size = np.array(primal_step_size)
+    pb.dual_step_size = np.array(dual_step_size)
   
     free(f)
     free(g)

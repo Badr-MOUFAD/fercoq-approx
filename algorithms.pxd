@@ -11,6 +11,12 @@ cdef enum:
     # particularly tiny on Windows/MSVC.
     RAND_R_MAX = 0x7FFFFFFF
 
+cdef void dual_prox_operator(DOUBLE[:] buff, DOUBLE[:] buff_y,
+                             DOUBLE[:] y, DOUBLE[:] prox_y,
+                             DOUBLE[:] rhx, int len_pb_h, atom* h,
+                             UINT32_t[:] blocks_h, DOUBLE[:] dual_step_size,
+                             DOUBLE[:] ch) nogil
+
 cdef void one_step_coordinate_descent(DOUBLE[:] x,
         DOUBLE[:] y, DOUBLE[:] Sy, DOUBLE[:] prox_y,
         DOUBLE[:] rhx, DOUBLE[:] rf, DOUBLE[:] rhy, DOUBLE[:] rhy_ii,

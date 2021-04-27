@@ -12,7 +12,8 @@ cdef enum:
     RAND_R_MAX = 0x7FFFFFFF
 
 cdef void one_step_pure_cd(DOUBLE[:] x, DOUBLE[:] x_av,
-        DOUBLE[:] y, DOUBLE [:] y_av, DOUBLE[:] prox_y, DOUBLE[:] rhx,
+        DOUBLE[:] y, DOUBLE [:] y_av, DOUBLE[:] prox_y, DOUBLE[:] prox_y_cpy,
+	DOUBLE[:] rhx,
         DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
         DOUBLE[:] grad,
@@ -33,8 +34,8 @@ cdef void one_step_pure_cd(DOUBLE[:] x, DOUBLE[:] x_av,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, 
         UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
-        UINT32_t per_pass, UINT32_t average,
-        DOUBLE* change_in_x, DOUBLE* change_in_y) nogil
+        UINT32_t per_pass, DOUBLE[:] averages,
+        DOUBLE* change_in_x, DOUBLE* change_in_y) 
 
 
 cdef void one_step_s_pdhg(DOUBLE[:] x,

@@ -27,10 +27,10 @@ def compute_theta_pure_cd(UINT32_t n, UINT32_t Ah_shape0,
                         UINT32_t[:] blocks, UINT32_t[:] blocks_h,
                         UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices,
                         UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
-                        UINT32_t keep_all=0):
+			pb, UINT32_t keep_all=0):
     cdef UINT32_t i, ii, lh, jh, j
     dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
-                                  Ah_indptr, Ah_indices, inv_blocks_h)
+                                  Ah_indptr, Ah_indices, inv_blocks_h, pb)
 
     # At the moment, this function does not take into account a possible
     #   block diagonal structure of Ah.
@@ -61,9 +61,23 @@ def compute_theta_pure_cd(UINT32_t n, UINT32_t Ah_shape0,
 
     return theta_pure_cd, dual_vars_to_update_2
 
+def finish_averaging(averages, x_av, y_av, x, prox_y, blocks, n, m):
+    for ii in range(n):
+        nb_coord = blocks[ii+1] - blocks[ii]
+        slice_to_average = float(averages[0] - averages[ii+1])
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            x_av[coord] += slice_to_average / averages[0] * \
+                           (x[coord] - x_av[coord])
+    for j in range(m):
+        slice_to_average = averages[0] - averages[j+n+1]
+        y_av[j] += slice_to_average / averages[0] * \
+                     (prox_y[j] - y_av[j])
+
 
 cdef void one_step_pure_cd(DOUBLE[:] x, DOUBLE[:] x_av,
-        DOUBLE[:] y, DOUBLE[:] y_av, DOUBLE[:] prox_y, DOUBLE[:] rhx,
+        DOUBLE[:] y, DOUBLE[:] y_av, DOUBLE[:] prox_y, DOUBLE[:] prox_y_cpy,
+        DOUBLE[:] rhx,
         DOUBLE[:] rhx_jj, DOUBLE[:] rf, DOUBLE[:] rQ,
         DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff, DOUBLE[:] x_ii,
         DOUBLE[:] grad,
@@ -84,11 +98,12 @@ cdef void one_step_pure_cd(DOUBLE[:] x, DOUBLE[:] x_av,
         int sampling_law, UINT32_t* rand_r_state,
         UINT32_t[:] active_set, UINT32_t n_active, 
         UINT32_t[:] focus_set, UINT32_t n_focus, UINT32_t n,
-        UINT32_t per_pass, UINT32_t average,
-        DOUBLE* change_in_x, DOUBLE* change_in_y) nogil:
+        UINT32_t per_pass, DOUBLE[:] averages,
+        DOUBLE* change_in_x, DOUBLE* change_in_y):
 
-    cdef UINT32_t ii, i, coord, j, jh, l, lh, jj, j_prev
+    cdef UINT32_t ii, i, coord, j, jh, jh2, l, lh, jj, j_prev
     cdef UINT32_t nb_coord
+    cdef DOUBLE slice_to_average
     cdef int focus_on_kink_or_not = 0
     cdef DOUBLE dy, dxi
     cdef DOUBLE rhprox_y_i
@@ -180,6 +195,13 @@ cdef void one_step_pure_cd(DOUBLE[:] x, DOUBLE[:] x_av,
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 x[coord] = (buff[i] + bg[coord]) / Dg_data[ii]
+                if averages[0] > 0:  # >0 because we do not average x0
+                    # averages[ii+1] tells us the last time x[coord] has been
+                    #    updated. averages[0] tell us where we are now.
+                    #    We can thus update the average at this coordinate.
+                    slice_to_average = averages[0] - averages[ii+1]  # this is a float
+                    x_av[coord] += slice_to_average / averages[0] * \
+                                   (x_ii[i] - x_av[coord])
 
         # Update residuals
         for i in range(nb_coord):
@@ -201,28 +223,31 @@ cdef void one_step_pure_cd(DOUBLE[:] x, DOUBLE[:] x_av,
 
         # update y
         if h_present is True:
-            for i in range(nb_coord):
-                coord = blocks[ii] + i
-                for l in range(dual_vars_to_update[ii][0]):
-                    jh = dual_vars_to_update[ii][1+l]
-                    j = inv_blocks_h[jh]
-                    #  We use Ah_nnz_perrow instead of theta_pure_cd
-                    dy = prox_y[jh] + dual_step_size[j] \
-                      * Ah_nnz_perrow[jh] * (rhx[jh] - rhx_jj[jh]) - y[jh]
-                    y[jh] += dy
-                    change_in_y[0] += fabs(dy)
+            j = -10
+            for i in range(dual_vars_to_update[ii][0]):
+                jh = dual_vars_to_update[ii][1+i]
+                j_prev = j
+                j = inv_blocks_h[jh]
+                if (i == 0 or j != j_prev):
+                    for l in range(blocks_h[j+1]-blocks_h[j]):
+                        jh2 = blocks_h[j]+l
+                        dy = prox_y[jh2] + dual_step_size[j] \
+                             * Ah_nnz_perrow[jh2] * (rhx[jh2] - rhx_jj[jh2]) - y[jh2]
+                        y[jh2] += dy
+                        if averages[0] > 0:
+                            ## we compute the average of \breve{y}, not the average of y
+                            slice_to_average = averages[0] - averages[jh2+n+1]
+                            y_av[jh2] += slice_to_average / averages[0] * \
+                                   (prox_y_cpy[jh2] - y_av[jh2])
+                            prox_y_cpy[jh2] = prox_y[jh2]
+                            averages[jh2+n+1] = averages[0]
+            
+                        change_in_y[0] += fabs(dy)
+                # else: we have already updated y[blocks_h[j]:blocks_h[j+1]], so nothing to do.
 
-        # compute averages
-        if average > 0:
-            for i in range(nb_coord):
-                coord = blocks[ii] + i
-                x_av[coord] += 1./average * (x[coord] - x_av[coord])
-                for l in range(dual_vars_to_update[ii][0]):
-                    jh = dual_vars_to_update[ii][1+l]
-                    j = inv_blocks_h[jh]
-                    # we compute \breve{y}, not the average of y
-                    y_av[jh] += 1./average * (prox_y[jh] - y_av[jh])
-            average += 1
+        if averages[0] >= 0:
+            averages[ii+1] = averages[0]
+            averages[0] += 1
 
     return
 
