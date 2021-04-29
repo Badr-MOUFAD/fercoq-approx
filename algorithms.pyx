@@ -417,8 +417,8 @@ cdef void one_step_accelerated_coordinate_descent(DOUBLE[:] x,
                 change_in_x[0] += fabs(dxei)
 
         # Update momentum parameters
-        c_theta[0] *= (1. - theta[0])
         theta[0] = next_theta(theta[0], h_present)
+        c_theta[0] *= (1. - theta[0])
         if h_present is True:
             beta[0] /= (1. + theta[0])
 

@@ -774,7 +774,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     Ah_col_indices, dual_vars_to_update, ch, bh,
                     Q_indptr, Q_indices, Q_data,
                     f, g, h, f_present, g_present, h_present,
-                    Lf, norm2_columns_Ah, 
+                    Lf, norm2_columns_Ah,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x)
@@ -843,7 +843,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     if Q_present is True:
                         for i in range(N):
                             rQ[i] = rQe[i] + c_theta * rQc[i]
-                            
+
                 compute_primal_value(pb, f, g, h, x, rf, rhx, rQ,
                                          buff_x, buff_y, buff,
                                          &primal_val, &infeas)
@@ -1010,8 +1010,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                         rf_av, rhx_av, rQ_av, y_av, z, AfTz, rQ_av,
                                         buff_x, buff_y, buff,
                                         &beta_tmp, &gamma_tmp,
-                                        compute_z=True,
-                                        compute_gamma=False)
+                                        compute_z=True, compute_gamma=False)
                         rQ_av = pb.Q.dot(x_init)
                         if f_present is True:
                            rf_av = pb.Af.dot(x_init) - pb.bf
@@ -1022,17 +1021,30 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                         rf_av, rhx_av, rQ_av, y_init, z, AfTz, rQ_av,
                                         buff_x, buff_y, buff,
                                         &beta_tmp, &gamma_tmp,
-                                        compute_z=True,
-                                        compute_gamma=False)
+                                        compute_z=True, compute_gamma=False)
+                        smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
+                                                            rf, rhx, rQ, prox_y, z, AfTz, rQ,
+                                        buff_x, buff_y, buff,
+                                        &beta_tmp, &gamma_tmp,
+                                        compute_z=True, compute_gamma=False)
+                        
                         if smoothed_gap_init > 0 and smoothed_gap_av > 0 and \
                            smoothed_gap_init > 2 * smoothed_gap_av:
-                              x_init = x_av.copy()
-                              y_init = y_av.copy()
+                              if smoothed_gap < smoothed_gap_av:
+                                    # do not restart at average but at current point
+                                    x_av = x.copy()
+                                    y_av = y.copy()
+                                    x_init = x.copy()
+                                    y_init = prox_y.copy()
+                              else:
+                                    x_init = x_av.copy()
+                                    y_init = y_av.copy()
                               do_restart = True
+                              print(smoothed_gap, smoothed_gap_av, smoothed_gap_init)
+
                         else:
                               print_restart -= 1
                               do_restart = False
-                        # print(averages[0], smoothed_gap_init, smoothed_gap_av, beta_tmp, gamma_tmp)
 
                     if do_restart == True:
                           x = x_av.copy()
