@@ -160,8 +160,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                 for i in range(nb_coord):
                     coord = blocks[ii] + i
                     buff_x[i] = 1. / Dg_data[ii] * (
-                        - (AfTz[coord] + AhTSy[coord] + w[coord])
-                        + bg[coord])
+                        - (AfTz[coord] + AhTSy[coord] + w[coord]))
                     # project -AfTz - AhTSy - w onto the domain of g*
                 g[ii](buff_x, buff, nb_coord,
                       PROX_CONJ, 1./INF, cg[ii])

@@ -80,12 +80,14 @@ class Problem:
             if blocks is None:
                   blocks = np.arange(N+1, dtype=np.uint32)
             self.blocks = np.array(blocks, dtype=np.uint32)
+            if blocks[-1] != N:
+                  raise Warning("blocks[-1] should be equal to N")
             if x_init is None:
                   self.x_init = np.zeros(N)
             else:
                   if len(x_init) != N:
                         raise Warning("x_init should have length N")
-                  self.x_init = x_init
+                  self.x_init = np.array(x_init, dtype=float)
 
             if f is not None and len(f) > 0:
                   self.f_present = True
@@ -486,7 +488,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         xe_ii = np.zeros(max_nb_coord)
 
     # Compute Lipschitz constants
-    cdef DOUBLE[:] tmp_Lf = np.zeros(len_pb_f)
+    cdef DOUBLE[:] tmp_Lf = np.zeros(max(n,len_pb_f))
     if Q_present:
         svdsQ1 = spl.svds(pb.Q, 1)
     else:
@@ -574,7 +576,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
             for jj in range(len(pb.blocks_h)-1):
                   dual_step_size[jj] = 1. / fmax(1e-10, Ah_nnz_perrow[jj]*np.sqrt(np.amax(np.array(tmp_Lf)))) * step_size_factor
 
-            tmp_Lf = np.empty(n)
             for ii in range(n):
                   tmp_Lf[ii] = 0
                   for i in range(blocks[ii+1] - blocks[ii]):
@@ -585,7 +586,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                             * Ah_nnz_perrow[Ah_indices[l]]
             primal_step_size = 0.9 / (Lf + np.array(tmp_Lf))
         else: raise Exception('Not implemented')
-
+        
     # Initialization of averaging
     cdef DOUBLE[:] x_av
     cdef DOUBLE[:] y_av
@@ -629,7 +630,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         averages[0] = 0
         if average < 0:
             print('cd_solver warning: average should be a nonnegative integer.')
-        
+
     beta = beta0
 
     cdef int sampling_law = 0  # default, uniform coordinate sampling probability
@@ -684,6 +685,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     else:
         focus_set = np.empty(0, dtype=np.uint32)
 
+    cdef UINT32_t iter
     cdef UINT32_t iter_last_check = -10
     cdef UINT32_t offset = 0
     cdef DOUBLE primal_val = 0.
@@ -709,7 +711,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                              buff_x, buff_y, buff, &val_backup, &infeas)
     
     #----------------------- Main loop ----------------------------#
-    init_time = time.time()
+    cdef DOUBLE init_time = time.time()
+    cdef DOUBLE elapsed_time = 0.
     if verbose > 0:
         pb.print_style = print_style
         pb.printed_values = []
@@ -811,7 +814,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     active_set, n_active, 
                     focus_set, n_focus, n, len(pb.h), per_pass,
                     &change_in_x, &change_in_y)
-              
+
         elapsed_time = time.time() - init_time
         if verbose > 0 or tolerance > 0:
             if ((verbose > 0 and elapsed_time > nb_prints * verbose)
