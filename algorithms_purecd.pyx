@@ -23,10 +23,10 @@ cdef inline UINT32_t rand_int(UINT32_t end, UINT32_t* random_state) nogil:
     return our_rand_r(random_state) % end
 
 
-def compute_theta_pure_cd(UINT32_t n, UINT32_t Ah_shape0,
+def dual_vars_to_update_pure_cd(UINT32_t n,
                         UINT32_t[:] blocks, UINT32_t[:] blocks_h,
                         UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices,
-                        UINT32_t[:] inv_blocks_h, UINT32_t[:] Ah_nnz_perrow,
+                        UINT32_t[:] inv_blocks_h,
 			pb, UINT32_t keep_all=0):
     cdef UINT32_t i, ii, lh, jh, j
     dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
@@ -56,10 +56,7 @@ def compute_theta_pure_cd(UINT32_t n, UINT32_t Ah_shape0,
                 if (i == 0) or (dual_vars_to_update_2[ii][lenlisti - 1] != jh):
                     dual_vars_to_update_2[ii].append(jh)
     
-    m = max([len(dual_vars_to_update_2[ii]) for ii in range(n)])
-    theta_pure_cd = np.array(Ah_nnz_perrow)  # [m] * n
-
-    return theta_pure_cd, dual_vars_to_update_2
+    return dual_vars_to_update_2
 
 def finish_averaging(averages, x_av, y_av, x, prox_y, blocks, n, m):
     for ii in range(n):
@@ -335,11 +332,11 @@ cdef void one_step_s_pdhg(DOUBLE[:] x,
                     a = Af_indptr[coord]
                     b = Af_indptr[coord+1]
                     if b-a == 0:
-                        buff_x[i] = Dg_data[ii] * (x[coord]) - bg[coord]
+                        buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
                     else:
-                        buff_x[i] = Dg_data[ii] * (x[coord]-primal_step_size[coord]*Af_data[a]) - bg[coord]
+                        buff_x[i] = Dg_data[ii] * (x[coord]-primal_step_size[ii]*Af_data[a]) - bg[coord]
                 else:
-                    buff_x[i] = Dg_data[ii] * (x[coord]) - bg[coord]
+                    buff_x[i] = Dg_data[ii] * x[coord] - bg[coord]
             g[ii](buff_x, buff, nb_coord, PROX,
                   cg[ii]*Dg_data[ii]*Dg_data[ii]*primal_step_size[ii],
                   useless_param)

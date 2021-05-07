@@ -71,9 +71,9 @@ cdef void compute_primal_value(pb, atom* f, atom* g, atom* h,
 
 cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                              DOUBLE[:] x, DOUBLE[:] rf, DOUBLE[:] rhx,
-                             DOUBLE[:] rQ,
-                             DOUBLE[:] Sy, DOUBLE[:] z, DOUBLE[:] AfTz,
-                             DOUBLE[:] w,
+                             DOUBLE[:] rQ, DOUBLE[:] Sy, DOUBLE[:] z,
+                             DOUBLE[:] AfTz, DOUBLE[:] w,
+                             DOUBLE[:] x_center, DOUBLE[:] y_center,
                              DOUBLE[:] buff_x, DOUBLE[:] buff_y, DOUBLE[:] buff,
                              DOUBLE* beta, DOUBLE* gamma, compute_z=True,
                              compute_gamma=True):
@@ -169,7 +169,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             dual_infeas = sqrt(dual_infeas)
             gamma[0] = max(1./INF, dual_infeas)
 
-        # compute g*_gamma(-AfTz - AhTSy - w;x) = -(AfTz + AhTSy + w)(xbar) - g(xbar) - gamma/2 ||x-xbar||**2
+        # compute g*_gamma(-AfTz - AhTSy - w;x_center) = -(AfTz + AhTSy + w)(xbar) - g(xbar) - gamma/2 ||x-x_center||**2
         val_g1 = 0.
         val_g2 = 0.
         val_g3 = 0.
@@ -180,7 +180,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 buff_x[i] = Dg_data[ii] * (
-                    x[coord] - 1. / gamma[0] * \
+                    x_center[coord] - 1. / gamma[0] * \
                        (AfTz[coord] + AhTSy[coord] + w[coord])) - bg[coord]
             g[ii](buff_x, buff, nb_coord, PROX,
                   cg[ii]*Dg_data[ii]**2/gamma[0], useless_param)
@@ -197,7 +197,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
             for i in range(nb_coord):
                 coord = blocks[ii] + i
                 val_g2 -= (AfTz[coord] + AhTSy[coord] + w[coord]) * xbar[coord]
-                val_g3 -= gamma[0] / 2. * (xbar[coord] - x[coord])**2
+                val_g3 -= gamma[0] / 2. * (xbar[coord] - x_center[coord])**2
         val += val_g + val_g1 + val_g2 + val_g3
         # print('contrib_g=', val_g + val_g1 + val_g2 + val_g3, val_g, val_g1, val_g2, val_g3)
 
@@ -227,14 +227,14 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                                         blocks_h[jh+1] - blocks_h[jh],
                                         VAL, useless_param, useless_param)
         if pb.h_takes_infinite_values == True:
-            # compute h_beta(Ah x - bh; Sy) = (Ah x - bh) ybar - h*(ybar) - beta/2 ||Sy - ybar||**2
+            # compute h_beta(Ah x - bh; y_center) = (Ah x - bh) ybar - h*(ybar) - beta/2 ||y_center - ybar||**2
             beta[0] = max(1./INF, beta[0])
             for jh in range(len(pb.h)):
                 nb_coord = blocks_h[jh+1] - blocks_h[jh]
                 # compute ybar
                 for l in range(nb_coord):
                     coord = blocks_h[jh] + l
-                    buff_y[l] = Sy[coord] + 1. / beta[0] * rhx[coord]
+                    buff_y[l] = y_center[coord] + 1. / beta[0] * rhx[coord]
                 h[jh](buff_y, buff, nb_coord, PROX_CONJ,
                       1./beta[0], ch[jh])
 
@@ -242,7 +242,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                 for l in range(nb_coord):
                     coord = blocks_h[jh] + l
                     ybar[coord] = buff[l]
-                    buff_y[l] = Sy[coord] + INF * ybar[coord]
+                    buff_y[l] = y_center[coord] + INF * ybar[coord]
                 h[jh](buff_y, buff, nb_coord, PROX,
                       ch[jh]*INF, useless_param)
                 for l in range(nb_coord):
@@ -253,7 +253,7 @@ cdef DOUBLE compute_smoothed_gap(pb, atom* f, atom* g, atom* h,
                 for l in range(nb_coord):
                     coord = blocks_h[jh] + l
                     val_h2 -= buff_y[l] * ybar[coord]
-                    val_h2 += rhx[coord] * ybar[coord] - beta[0] / 2. * (Sy[coord] - ybar[coord])**2
+                    val_h2 += rhx[coord] * ybar[coord] - beta[0] / 2. * (y_center[coord] - ybar[coord])**2
         # print('contrib h:', val_h, val_hh, val_h2, np.array(Sy))
         val += val_h + val_hh + val_h2
     return val

@@ -25,7 +25,8 @@ from .screening cimport polar_matrix_norm, do_gap_safe_screening
 from .screening cimport update_focus_set, dual_scaling
 
 from .algorithms import find_dual_variables_to_update, variable_restart
-from .algorithms_purecd import compute_theta_pure_cd, transform_f_into_h
+from .algorithms import compute_Ah_nnz_perrow
+from .algorithms_purecd import dual_vars_to_update_pure_cd, transform_f_into_h
 from .algorithms_purecd import finish_averaging
 
 
@@ -284,7 +285,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
     cdef UINT32_t[:] Ah_indptr = np.array(pb.Ah.indptr, dtype=np.uint32)
     cdef UINT32_t[:] Ah_indices = np.array(pb.Ah.indices, dtype=np.uint32)  # I do not know why but the order of the indices is changed here...
     cdef DOUBLE[:] Ah_data = np.array(pb.Ah.data, dtype=float)  # Fortunately, it seems that the same thing happens here.
-    cdef UINT32_t[:] Ah_nnz_perrow = np.array(np.minimum(n, (pb.Ah!=0).sum(axis=1)), dtype=np.uint32).ravel()  # an improvement would be to cout the number of nonzero blocks instead of the number of nonzero entries
     cdef DOUBLE[:] bh = pb.bh
     cdef int Q_present = pb.Q_present
     cdef UINT32_t[:] Q_indptr = np.array(pb.Q.indptr, dtype=np.uint32)
@@ -365,6 +365,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 Ah_col_indices[lh] = i
 
     cdef UINT32_t[:] inv_blocks_h = np.zeros(pb.Ah.shape[0], dtype=np.uint32)
+    cdef UINT32_t[:] Ah_nnz_perrow = np.zeros(pb.Ah.shape[0], dtype=np.uint32)
     cdef UINT32_t[:,:] dual_vars_to_update
     cdef DOUBLE[:] theta_pure_cd = np.empty(1)
     if h_present is True and algorithm is not None:
@@ -376,13 +377,19 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         if (algorithm == 'vu-condat-cd' or algorithm == 'smart-cd'):
             dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
                                        Ah_indptr, Ah_indices, inv_blocks_h, pb)
+            compute_Ah_nnz_perrow(n, Ah_nnz_perrow, blocks, blocks_h,
+                              Ah_indptr, Ah_indices, inv_blocks_h, pb,
+                              gather_blocks_h=False)
         elif algorithm == 'pure-cd':
-            theta_pure_cd_, dual_vars_to_update_ = compute_theta_pure_cd(n,
-                                                pb.Ah.shape[0], blocks,
-                                                blocks_h,
-                                                Ah_indptr, Ah_indices,
-                                                inv_blocks_h, Ah_nnz_perrow, pb)
-            theta_pure_cd = np.array(theta_pure_cd_, dtype=float)
+            compute_Ah_nnz_perrow(n, Ah_nnz_perrow, blocks, blocks_h,
+                              Ah_indptr, Ah_indices, inv_blocks_h, pb,
+                              gather_blocks_h=True)
+            dual_vars_to_update_ = \
+                  dual_vars_to_update_pure_cd(n, blocks,
+                                        blocks_h, Ah_indptr, Ah_indices,
+                                        inv_blocks_h, pb)
+            theta_pure_cd = np.array(Ah_nnz_perrow, dtype=np.float64)
+            print(np.array(Ah_nnz_perrow), np.array(theta_pure_cd))
         elif algorithm == 's-pdhg':
             dual_vars_to_update_ = [[0]]*n  # all the dual variables are updated so nothing to do here.
         else: raise Exception('Not implemented')
@@ -426,6 +433,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         Sy = y
         # Just a convenient alias since y does not have any
         #    duplicate in this case
+    cdef DOUBLE[:] hbg = pb.Ah.dot(pb.bg)
     cdef DOUBLE[:] rQ = pb.Q.dot(x)
     cdef DOUBLE[:] w = rQ.copy()
 
@@ -782,7 +790,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x)
         elif algorithm == 'pure-cd':
-            one_step_pure_cd(x, x_av,
+              print('avant', np.array(y), np.array(prox_y), np.array(prox_y_cpy), np.array(x), np.array(rhx), np.array(rhx_jj))
+
+              one_step_pure_cd(x, x_av,
                     y, y_av, prox_y, prox_y_cpy, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
                     blocks, blocks_f, blocks_h,
@@ -799,6 +809,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, averages, &change_in_x, &change_in_y)
+              print('apres', np.array(y), np.array(prox_y), np.array(prox_y_cpy), np.array(x), np.array(rhx), np.array(rhx_jj))
         elif algorithm == 's-pdhg':
             one_step_s_pdhg(x, y, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
@@ -893,7 +904,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
 
                     smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
                                         rf, rhx, rQ, prox_y, z, AfTz, rQ,
-                                        buff_x, buff_y, buff,
+                                        x, prox_y, buff_x, buff_y, buff,
                                         &beta_print, &gamma_print,
                                         compute_z=True,
                                         compute_gamma=compute_gamma)
@@ -913,7 +924,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                 if print_style == 'gap' and print_time == True:
                     # Scale dual vector and compute duality gap
                     compute_smoothed_gap(pb, f, g, h, x,
-                                   rf, rhx, rQ, prox_y, z, AfTz, w,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w, x, prox_y,
                                    buff_x, buff_y, buff,
                                    &beta_print, &gamma_print, compute_z=True)
                     scaling = dual_scaling(z, AfTz, w, n_active,
@@ -921,7 +932,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     beta_print = 0.
                     gamma_print = 1. / INF
                     gap = compute_smoothed_gap(pb, f, g, h, x,
-                                   rf, rhx, rQ, prox_y, z, AfTz, w,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w, x, prox_y, 
                                    buff_x, buff_y, buff,
                                    &beta_print, &gamma_print, compute_z=False,
                                    compute_gamma=False)
@@ -1009,8 +1020,9 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            rhx_av = pb.Ah * x_av - pb.bh
                         beta_tmp = 2 * primal_step_size[0] / averages[0]
                         gamma_tmp = 2 * dual_step_size[0] / averages[0]
-                        smoothed_gap_av = compute_smoothed_gap(pb, f, g, h, x_av,
-                                        rf_av, rhx_av, rQ_av, y_av, z, AfTz, rQ_av,
+                        smoothed_gap_av = compute_smoothed_gap(pb, f, g, h,
+                                        x_av, rf_av, rhx_av, rQ_av, y_av, z,
+                                        AfTz, rQ_av, x_av, y_av,
                                         buff_x, buff_y, buff,
                                         &beta_tmp, &gamma_tmp,
                                         compute_z=True, compute_gamma=False)
@@ -1020,19 +1032,21 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         if h_present is True:
                            rhx_av = pb.Ah * x_init - pb.bh
 
-                        smoothed_gap_init = compute_smoothed_gap(pb, f, g, h, x_init,
-                                        rf_av, rhx_av, rQ_av, y_init, z, AfTz, rQ_av,
+                        smoothed_gap_init = compute_smoothed_gap(pb, f, g, h,
+                                        x_init, rf_av, rhx_av, rQ_av, y_init,
+                                        z, AfTz, rQ_av, x_av, y_av,
                                         buff_x, buff_y, buff,
                                         &beta_tmp, &gamma_tmp,
                                         compute_z=True, compute_gamma=False)
                         smoothed_gap = compute_smoothed_gap(pb, f, g, h, x,
-                                                            rf, rhx, rQ, prox_y, z, AfTz, rQ,
-                                        buff_x, buff_y, buff,
+                                        rf, rhx, rQ, prox_y, z, AfTz, rQ,
+                                        x_av, y_av, buff_x, buff_y, buff,
                                         &beta_tmp, &gamma_tmp,
                                         compute_z=True, compute_gamma=False)
                         
+                        print(smoothed_gap, smoothed_gap_av, smoothed_gap_init)
                         if smoothed_gap_init > 0 and smoothed_gap_av > 0 and \
-                           smoothed_gap_init > 2 * smoothed_gap_av:
+                           smoothed_gap_init > 1.5 * smoothed_gap_av:
                               if smoothed_gap < smoothed_gap_av:
                                     # do not restart at average but at current point
                                     x_av = x.copy()
@@ -1043,8 +1057,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                     x_init = x_av.copy()
                                     y_init = y_av.copy()
                               do_restart = True
-                              print(smoothed_gap, smoothed_gap_av, smoothed_gap_init)
-
                         else:
                               print_restart -= 1
                               do_restart = False
@@ -1093,7 +1105,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         pb.dual_sol_duplicated = np.array(y).copy()
     elif (algorithm == 'smart-cd' or algorithm == 'pure-cd'
               or algorithm == 's-pdhg' or algorithm == None):
-        if algorithm == 'smart-cd':
+        if algorithm == 'smart-cd' or algorithm == 'pure-cd':
               pb.dual_sol = np.array(prox_y).copy()
         else:
               pb.dual_sol = np.array(y).copy()

@@ -3,7 +3,7 @@
 
 # C definitions in algorithms.pxd
 import numpy as np
-
+from scipy import sparse
 
 cdef inline UINT32_t our_rand_r(UINT32_t* seed) nogil:
     seed[0] ^= <UINT32_t>(seed[0] << 13)
@@ -60,6 +60,47 @@ cdef void dual_prox_operator(DOUBLE[:] buff, DOUBLE[:] buff_y,
         for l in range(blocks_h[j+1]-blocks_h[j]):
             prox_y[blocks_h[j]+l] = buff[l]
 
+
+def compute_Ah_nnz_perrow(UINT32_t n, UINT32_t[:] Ah_nnz_perrow,
+                          UINT32_t[:] blocks, UINT32_t[:] blocks_h,
+                          UINT32_t[:] Ah_indptr, UINT32_t[:] Ah_indices,
+                          UINT32_t[:] inv_blocks_h, pb, gather_blocks_h=False):
+    cdef UINT32_t i, ii, lh, jh, j, coord, nb_coord, current_index
+    Ah_block_summary_indptr = np.zeros(n+1, dtype=np.uint32)
+    Ah_block_summary_indices = np.empty(pb.Ah.nnz, dtype=np.uint32)
+    current_index = 0
+    if gather_blocks_h == 1:
+        len_summary = len(pb.h)
+    else:
+        len_summary = pb.Ah.shape[0]
+    for ii in range(n):
+        Ah_block_summary_indptr[ii+1] = Ah_block_summary_indptr[ii]
+        nb_coord = blocks[ii+1] - blocks[ii]
+        for i in range(nb_coord):
+            coord = blocks[ii] + i
+            for lh in range(Ah_indptr[coord], Ah_indptr[coord+1]):
+                jh = Ah_indices[lh]
+                if gather_blocks_h == 1:
+                    j = inv_blocks_h[jh]
+                else:
+                    j = jh
+                Ah_block_summary_indices[current_index] = j
+                Ah_block_summary_indptr[ii+1] += 1
+                current_index += 1
+    Ah_block_summary = sparse.csc_matrix((np.ones(current_index),
+                                          Ah_block_summary_indices[:current_index],
+                                          Ah_block_summary_indptr),
+                                         (len_summary, n))
+    Ah_block_summary.tocoo().tocsc()  # remove double indices
+    Ah_block_summary = (Ah_block_summary!=0)
+    Ah_block_summary = np.maximum(1, np.array(Ah_block_summary.sum(axis=1)).ravel())
+    if gather_blocks_h == 1:
+        for j in range(len(pb.h)):
+            for jh in range(blocks_h[j],blocks_h[j+1]):
+                Ah_nnz_perrow[jh] = Ah_block_summary[j]
+    else:
+        for jh in range(pb.Ah.shape[0]):
+            Ah_nnz_perrow[jh] = Ah_block_summary[jh]
 
 
 cdef void one_step_coordinate_descent(DOUBLE[:] x,

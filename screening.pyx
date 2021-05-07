@@ -206,7 +206,7 @@ cdef UINT32_t do_gap_safe_screening(UINT32_t[:] active_set,
 
     # Scale dual vector and compute duality gap
     gap = compute_smoothed_gap(pb, f, g, h, x,
-                                   rf, rhx, rQ, prox_y, z, AfTz, w,
+                                   rf, rhx, rQ, prox_y, z, AfTz, w, x, prox_y,
                                    buff_x, buff_y, buff,
                                    &beta, &gamma, compute_z=False,
                                    compute_gamma=False)
