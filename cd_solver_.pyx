@@ -213,7 +213,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                            UINT32_t average=0, int restart_period=0,
                            fixed_restart_period=False, callback=None,
                            int per_pass=1,
-                           screening=None, gamma_print_=None):
+                           screening=None, gamma_print_=None,
+                           show_restart_info=False):
     # pb is a Problem as defined above
     # max_iter: maximum number of passes over the data
     # max_time: in seconds
@@ -377,9 +378,7 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         if (algorithm == 'vu-condat-cd' or algorithm == 'smart-cd'):
             dual_vars_to_update_ = find_dual_variables_to_update(n, blocks, blocks_h,
                                        Ah_indptr, Ah_indices, inv_blocks_h, pb)
-            compute_Ah_nnz_perrow(n, Ah_nnz_perrow, blocks, blocks_h,
-                              Ah_indptr, Ah_indices, inv_blocks_h, pb,
-                              gather_blocks_h=False)
+            Ah_nnz_perrow = np.array(np.maximum(1, (pb.Ah!=0).sum(axis=1)), dtype=np.uint32).ravel()
         elif algorithm == 'pure-cd':
             compute_Ah_nnz_perrow(n, Ah_nnz_perrow, blocks, blocks_h,
                               Ah_indptr, Ah_indices, inv_blocks_h, pb,
@@ -389,7 +388,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                         blocks_h, Ah_indptr, Ah_indices,
                                         inv_blocks_h, pb)
             theta_pure_cd = np.array(Ah_nnz_perrow, dtype=np.float64)
-            print(np.array(Ah_nnz_perrow), np.array(theta_pure_cd))
         elif algorithm == 's-pdhg':
             dual_vars_to_update_ = [[0]]*n  # all the dual variables are updated so nothing to do here.
         else: raise Exception('Not implemented')
@@ -433,7 +431,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
         Sy = y
         # Just a convenient alias since y does not have any
         #    duplicate in this case
-    cdef DOUBLE[:] hbg = pb.Ah.dot(pb.bg)
     cdef DOUBLE[:] rQ = pb.Q.dot(x)
     cdef DOUBLE[:] w = rQ.copy()
 
@@ -790,8 +787,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     focus_set, n_focus, n,
                     per_pass, &change_in_x)
         elif algorithm == 'pure-cd':
-              print('avant', np.array(y), np.array(prox_y), np.array(prox_y_cpy), np.array(x), np.array(rhx), np.array(rhx_jj))
-
               one_step_pure_cd(x, x_av,
                     y, y_av, prox_y, prox_y_cpy, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
@@ -809,7 +804,6 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     sampling_law, rand_r_state, active_set, n_active,
                     focus_set, n_focus, n,
                     per_pass, averages, &change_in_x, &change_in_y)
-              print('apres', np.array(y), np.array(prox_y), np.array(prox_y_cpy), np.array(x), np.array(rhx), np.array(rhx_jj))
         elif algorithm == 's-pdhg':
             one_step_s_pdhg(x, y, rhx, rhx_jj, rf, rQ,
                     buff_x, buff_y, buff, x_ii, grad,
@@ -1044,9 +1038,10 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                                         &beta_tmp, &gamma_tmp,
                                         compute_z=True, compute_gamma=False)
                         
-                        print(smoothed_gap, smoothed_gap_av, smoothed_gap_init)
+                        if show_restart_info == True:
+                              print(smoothed_gap, smoothed_gap_av, smoothed_gap_init)
                         if smoothed_gap_init > 0 and smoothed_gap_av > 0 and \
-                           smoothed_gap_init > 1.5 * smoothed_gap_av:
+                           smoothed_gap_init > 2 * min(smoothed_gap_av, smoothed_gap):
                               if smoothed_gap < smoothed_gap_av:
                                     # do not restart at average but at current point
                                     x_av = x.copy()
