@@ -471,9 +471,7 @@ def variable_restart(restart_history, iter, restart_period, next_period,
     if (iter % next_period) != next_period - 1:
         return (False, next_period)
     else:
-        if fixed_restart_period == True:
-            return (True, restart_period)
-        else:
+        if fixed_restart_period == False:
             j = 0
             while j < len(restart_history) and restart_history[j] == 1:
                 j += 1
@@ -485,4 +483,5 @@ def variable_restart(restart_history, iter, restart_period, next_period,
                 restart_history.append(1)
 
             return (True, restart_period * 2**j)
-        
+        else:
+            return (True, restart_period)

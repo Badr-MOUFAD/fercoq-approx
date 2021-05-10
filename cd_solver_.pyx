@@ -171,7 +171,7 @@ class Problem:
                 blocks_h = np.arange(len(h)+1, dtype=np.uint32)
             if len(blocks_h) != len(h) + 1 or blocks_h[-1] != Ah.shape[0]:
                     raise Warning("blocks_h seems to be ill defined.")
-            if Q is None or Q_present == False:
+            if Q is None:
                 self.Q_present = False
                 Q = sparse.csc_matrix((N, N))  # 0 matrix
             else:
@@ -1005,7 +1005,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                     ##         x_backup = np.array(xe).copy()
 
                 elif average > 0:
-                    finish_averaging(averages, x_av, y_av, x, prox_y, blocks, len(pb.g), pb.Ah.shape[0])
+                    finish_averaging(averages, x_av, y_av, x, prox_y, blocks,
+                                     len(pb.g), pb.Ah.shape[0])
                     if fixed_restart_period == 'adaptive':
                         rQ_av = pb.Q.dot(x_av)
                         if f_present is True:
@@ -1041,7 +1042,8 @@ def coordinate_descent(pb, int max_iter=1000, max_time=1000.,
                         if show_restart_info == True:
                               print(smoothed_gap, smoothed_gap_av, smoothed_gap_init)
                         if smoothed_gap_init > 0 and smoothed_gap_av > 0 and \
-                           smoothed_gap_init > 2 * min(smoothed_gap_av, smoothed_gap):
+                           (smoothed_gap_init > 2 * min(smoothed_gap_av, smoothed_gap)
+                            or smoothed_gap_init < 0.1 * min(smoothed_gap_av, smoothed_gap)):
                               if smoothed_gap < smoothed_gap_av:
                                     # do not restart at average but at current point
                                     x_av = x.copy()
