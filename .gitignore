@@ -1,0 +1,5 @@
+*.pyc
+*.so
+*.cpp
+/cd_solver.egg-info/*
+/build/*
