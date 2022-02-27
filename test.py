@@ -7,12 +7,8 @@ import scipy.sparse as sp
 import cd_solver
 
 # imports for loading datasets
-from scipy import io
+from libsvmdata import fetch_libsvm
 from sklearn.datasets import fetch_openml
-#from sklearn.externals.joblib import Memory
-#import sys
-# sys.path.append("../tv_l1_solver")
-#from load_poldrack import load_gain_poldrack
 
 if 0:
     # Check gradients
@@ -254,12 +250,7 @@ for prob in probs:
         print("dual SVM with intercept on RCV1")
 
         # data = svmlight_format.load_svmlight_file('/home/ofercoq/scikit_learn_data/mldata/rcv1_train.binary')
-        data = io.loadmat('/home/ofercoq/datasets/rcv1_train.binary.mat')
-        # data = fetch_rcv1()
-
-        X = data['X'].astype(np.float)
-        y = data['y'].astype(np.float).ravel()
-
+        X, y = fetch_libsvm("rcv1.binary")
         C = 1. / X.shape[0]
         alpha = 0.25 / X.shape[0]
 
