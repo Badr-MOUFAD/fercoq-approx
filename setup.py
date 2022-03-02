@@ -1,9 +1,7 @@
-import os
-from importlib_metadata import version
 
 import numpy as np
 
-from distutils.core import setup
+from setuptools import setup, find_packages
 from Cython.Distutils import build_ext, Extension
 
 
@@ -19,6 +17,11 @@ DOWNLOAD_URL = 'https://bitbucket.org/ofercoq/cd_solver.git'
 URL = 'https://bitbucket.org/ofercoq/cd_solver/src'
 VERSION = '0.1'
 
+cython_directives = {'boundscheck': False,
+                     'cdivision': True,
+                     'wraparound': False,
+                     'language_level': 3}
+
 setup(name='cd_solver',
       description=DESCRIPTION,
       version=VERSION,
@@ -28,52 +31,38 @@ setup(name='cd_solver',
       maintainer_email=MAINTAINER_EMAIL,
       url=URL,
       download_url=DOWNLOAD_URL,
+      packages=find_packages(),
       cmdclass={'build_ext': build_ext},
       ext_modules=[
           Extension('cd_solver.atoms',
                     sources=['cd_solver/atoms.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
-                    cython_directives={'boundscheck': False,
-                                       'cdivision': True,
-                                       'wraparound': False,
-                                       'language_level': 3},
+                    cython_directives=cython_directives,
                     extra_compile_args=["-O3"]),
           Extension('cd_solver.helpers',
                     sources=['cd_solver/helpers.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
-                    cython_directives={'boundscheck': False,
-                                       'cdivision': True,
-                                       'wraparound': False,
-                                       'language_level': 3},
+                    cython_directives=cython_directives,
                     extra_compile_args=["-O3"]),
           Extension('cd_solver.algorithms',
                     sources=['cd_solver/algorithms.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
-                    cython_directives={'boundscheck': False,
-                                       'cdivision': True,
-                                       'wraparound': False,
-                                       'language_level': 3},
+                    cython_directives=cython_directives,
                     extra_compile_args=["-O3"]),
           Extension('cd_solver.algorithms_purecd',
                     sources=['cd_solver/algorithms_purecd.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
-                    cython_directives={'boundscheck': False,
-                                       'cdivision': True,
-                                       'wraparound': False,
-                                       'language_level': 3},
+                    cython_directives=cython_directives,
                     extra_compile_args=["-O3"]),
           Extension('cd_solver.screening',
                     sources=['cd_solver/screening.pyx'],
                     language='c++',
                     include_dirs=[np.get_include()],
-                    cython_directives={'boundscheck': False,
-                                       'cdivision': True,
-                                       'wraparound': False,
-                                       'language_level': 3},
+                    cython_directives=cython_directives,
                     extra_compile_args=["-O3"]),
           Extension('cd_solver.cd_solver_',
                     sources=['cd_solver/cd_solver_.pyx'],
