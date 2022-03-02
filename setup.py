@@ -1,8 +1,8 @@
 
 import numpy as np
 
-from setuptools import setup, find_packages
-from Cython.Distutils import build_ext, Extension
+from setuptools import setup, find_packages, Extension
+from setuptools.command.build_ext import build_ext
 
 
 descr = 'Efficient implementation of a generic CD solver'
@@ -32,6 +32,7 @@ setup(name='cd_solver',
       url=URL,
       download_url=DOWNLOAD_URL,
       packages=find_packages(),
+      requirements=["Cython", "numpy", "scipy"],
       cmdclass={'build_ext': build_ext},
       ext_modules=[
           Extension('cd_solver.atoms',
