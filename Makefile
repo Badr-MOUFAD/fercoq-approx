@@ -30,3 +30,22 @@ screening.cpp: helpers.cpp screening.pyx screening.pxd
 
 cd_solver_.cpp: atoms.cpp helpers.cpp algorithms.cpp algorithms_purecd.cpp screening.cpp cd_solver_.pyx
 	cython --cplus -X boundscheck=False -X cdivision=True -X language_level=3 cd_solver_.pyx
+
+
+clean-pyc:
+	find . -name "*.pyc" | xargs rm -f
+	find . -name "__pycache__" | xargs rm -rf
+
+clean-so:
+	find . -name "*.so" | xargs rm -f
+	find . -name "*.pyd" | xargs rm -f
+	find . -name "*.cpp" | xargs rm -f
+	find . -name "*.c" | xargs rm -f
+
+clean-build:
+	rm -rf build
+
+clean-ctags:
+	rm -f tags
+
+clean: clean-build clean-pyc clean-so clean-ctags
