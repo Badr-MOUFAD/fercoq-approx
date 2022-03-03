@@ -16,10 +16,10 @@ DOWNLOAD_URL = 'https://bitbucket.org/ofercoq/cd_solver.git'
 URL = 'https://bitbucket.org/ofercoq/cd_solver/src'
 VERSION = '0.1'
 
-cython_directives = {'boundscheck': False,
-                     'cdivision': True,
-                     'wraparound': False,
-                     'language_level': 3}
+cython_directives = {'boundscheck': "False",
+                     'cdivision': "True",
+                     'wraparound': "False",
+                     'language_level': "3"}
 
 setup(name='cd_solver',
       description=DESCRIPTION,
