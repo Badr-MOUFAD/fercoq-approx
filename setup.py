@@ -65,9 +65,9 @@ setup(name='cd_solver',
       url=URL,
       download_url=DOWNLOAD_URL,
       packages=find_packages(),
-      #   setup_requires=["cython"],
       install_requires=["numpy", "scipy"],
       cmdclass={'build_ext': build_ext},
       ext_modules=cythonize(
           extensions, compiler_directives=compiler_directives),
+      extra_link_args=['-L/usr/lib/x86_64-linux-gnu/'],
       )
