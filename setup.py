@@ -1,9 +1,7 @@
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
-# dist.Distribution().fetch_build_eggs(['numpy>=1.12'])
 import numpy as np  # noqa
 from Cython.Build import cythonize
-# import cython
 
 descr = 'Efficient implementation of a generic CD solver'
 
