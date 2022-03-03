@@ -17,10 +17,10 @@ DOWNLOAD_URL = 'https://bitbucket.org/ofercoq/cd_solver.git'
 URL = 'https://bitbucket.org/ofercoq/cd_solver/src'
 VERSION = '0.1'
 
-cython_directives = {'boundscheck': "False",
-                     'cdivision': "True",
-                     'wraparound': "False",
-                     'language_level': "3"}
+compiler_directives = {'boundscheck': "False",
+                       'cdivision': "True",
+                       'wraparound': "False",
+                       'language_level': "3"}
 
 extensions = [
     Extension('cd_solver.atoms',
@@ -37,7 +37,6 @@ extensions = [
               sources=['cd_solver/algorithms.pyx'],
               language='c++',
               include_dirs=[np.get_include()],
-              cython_directives=cython_directives,
               extra_compile_args=["-O3"]),
     Extension('cd_solver.algorithms_purecd',
               sources=['cd_solver/algorithms_purecd.pyx'],
@@ -69,5 +68,6 @@ setup(name='cd_solver',
       #   setup_requires=["cython"],
       install_requires=["numpy", "scipy"],
       cmdclass={'build_ext': build_ext},
-      ext_modules=cythonize(extensions, cython_directives=cython_directives),
+      ext_modules=cythonize(
+          extensions, compiler_directives=compiler_directives),
       )
