@@ -15,10 +15,10 @@ DOWNLOAD_URL = 'https://bitbucket.org/ofercoq/cd_solver.git'
 URL = 'https://bitbucket.org/ofercoq/cd_solver/src'
 VERSION = '0.1'
 
-compiler_directives = {'boundscheck': "False",
-                       'cdivision': "True",
-                       'wraparound': "False",
-                       'language_level': "3"}
+compiler_directives = {'boundscheck': False,
+                       'cdivision': True,
+                       'wraparound': False,
+                       'language_level': 3}
 
 extensions = [
     Extension('cd_solver.atoms',
