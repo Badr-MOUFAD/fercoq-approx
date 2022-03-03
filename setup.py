@@ -1,7 +1,8 @@
-from setuptools import setup, find_packages, Extension, dist
+from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 # dist.Distribution().fetch_build_eggs(['numpy>=1.12'])
 import numpy as np  # noqa
+from Cython.Build import cythonize
 # import cython
 
 descr = 'Efficient implementation of a generic CD solver'
@@ -16,10 +17,44 @@ DOWNLOAD_URL = 'https://bitbucket.org/ofercoq/cd_solver.git'
 URL = 'https://bitbucket.org/ofercoq/cd_solver/src'
 VERSION = '0.1'
 
-compiler_directives = {'boundscheck': "False",
-                       'cdivision': "True",
-                       'wraparound': "False",
-                       'language_level': "3"}
+cython_directives = {'boundscheck': "False",
+                     'cdivision': "True",
+                     'wraparound': "False",
+                     'language_level': "3"}
+
+extensions = [
+    Extension('cd_solver.atoms',
+              sources=['cd_solver/atoms.pyx'],
+              language='c++',
+              include_dirs=[np.get_include()],
+              extra_compile_args=["-O3"]),
+    Extension('cd_solver.helpers',
+              sources=['cd_solver/helpers.pyx'],
+              language='c++',
+              include_dirs=[np.get_include()],
+              extra_compile_args=["-O3"]),
+    Extension('cd_solver.algorithms',
+              sources=['cd_solver/algorithms.pyx'],
+              language='c++',
+              include_dirs=[np.get_include()],
+              cython_directives=cython_directives,
+              extra_compile_args=["-O3"]),
+    Extension('cd_solver.algorithms_purecd',
+              sources=['cd_solver/algorithms_purecd.pyx'],
+              language='c++',
+              include_dirs=[np.get_include()],
+              extra_compile_args=["-O3"]),
+    Extension('cd_solver.screening',
+              sources=['cd_solver/screening.pyx'],
+              language='c++',
+              include_dirs=[np.get_include()],
+              extra_compile_args=["-O3"]),
+    Extension('cd_solver.cd_solver_',
+              sources=['cd_solver/cd_solver_.pyx'],
+              language='c++',
+              include_dirs=[np.get_include()],
+              extra_compile_args=["-O3"]),
+]
 
 setup(name='cd_solver',
       description=DESCRIPTION,
@@ -34,42 +69,5 @@ setup(name='cd_solver',
       #   setup_requires=["cython"],
       install_requires=["numpy", "scipy"],
       cmdclass={'build_ext': build_ext},
-      ext_modules=[
-          Extension('cd_solver.atoms',
-                    sources=['cd_solver/atoms.pyx'],
-                    language='c++',
-                    include_dirs=[np.get_include()],
-                    compiler_directives=compiler_directives,
-                    extra_compile_args=["-O3"]),
-          Extension('cd_solver.helpers',
-                    sources=['cd_solver/helpers.pyx'],
-                    language='c++',
-                    include_dirs=[np.get_include()],
-                    compiler_directives=compiler_directives,
-                    extra_compile_args=["-O3"]),
-          Extension('cd_solver.algorithms',
-                    sources=['cd_solver/algorithms.pyx'],
-                    language='c++',
-                    include_dirs=[np.get_include()],
-                    compiler_directives=compiler_directives,
-                    extra_compile_args=["-O3"]),
-          Extension('cd_solver.algorithms_purecd',
-                    sources=['cd_solver/algorithms_purecd.pyx'],
-                    language='c++',
-                    include_dirs=[np.get_include()],
-                    compiler_directives=compiler_directives,
-                    extra_compile_args=["-O3"]),
-          Extension('cd_solver.screening',
-                    sources=['cd_solver/screening.pyx'],
-                    language='c++',
-                    include_dirs=[np.get_include()],
-                    compiler_directives=compiler_directives,
-                    extra_compile_args=["-O3"]),
-          Extension('cd_solver.cd_solver_',
-                    sources=['cd_solver/cd_solver_.pyx'],
-                    language='c++',
-                    include_dirs=[np.get_include()],
-                    compiler_directives=compiler_directives,
-                    extra_compile_args=["-O3"]),
-      ],
+      ext_modules=cythonize(extensions, cython_directives=cython_directives),
       )
