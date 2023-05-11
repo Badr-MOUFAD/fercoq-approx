@@ -7,6 +7,8 @@ from .atoms cimport *
 
 from libc.stdlib cimport malloc, free
 
+cimport cython
+
 import numpy as np
 from scipy import linalg
 from scipy import sparse
@@ -38,6 +40,7 @@ class Problem:
       # min_x sum_j cf[j] * f_j (Af[j] x - bf[j])
       # 	      	    + cg * g (Dg x - bg) + ch * h (Ah x - bh)
       
+      @cython.wraparound(True)  
       def __init__(self, N=None, blocks=None, x_init=None, y_init=None,
                          f=None, cf=None, Af=None, bf=None, blocks_f=None,
                          g=None, cg=None, Dg=None, bg=None,
